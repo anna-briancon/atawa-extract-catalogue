@@ -111,8 +111,29 @@ def status(job_id):
         return jsonify({"status": "inconnu"})
     started_at = job.get("started_at")
     if isinstance(started_at, (int, float)):
-        job["elapsed_seconds"] = int(max(0, time.time() - started_at))
-    return jsonify(job)
+        elapsed_seconds = int(max(0, time.time() - started_at))
+    else:
+        elapsed_seconds = None
+    return jsonify({
+        "status": job.get("status", "inconnu"),
+        "error": job.get("error"),
+        "pdf_name": job.get("pdf_name"),
+        "elapsed_seconds": elapsed_seconds,
+        "timeout_seconds": job.get("timeout_seconds"),
+        "produits_count": len(job.get("produits", []) or []),
+    })
+
+@app.route("/results/<job_id>")
+def results(job_id):
+    job = jobs.get(job_id)
+    if not job:
+        return jsonify({"error": "Job inconnu"}), 404
+    if job.get("status") != "done":
+        return jsonify({"error": "Résultats non disponibles"}), 409
+    return jsonify({
+        "produits": job.get("produits", []),
+        "pdf_name": job.get("pdf_name"),
+    })
 
 @app.route("/images/<path:filename>")
 def serve_image(filename):

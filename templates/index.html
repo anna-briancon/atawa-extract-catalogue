@@ -103,7 +103,7 @@
         let isTopPanelCollapsed = false;
         let activePollInterval = null;
         let resultsClosedByUser = false;
-        const CLIENT_POLL_TIMEOUT_MS = 5 * 60 * 1000;
+        const CLIENT_POLL_TIMEOUT_MS = 4 * 60 * 1000;
 
         dropZone.addEventListener("click", () => fileInput.click());
         dropZone.addEventListener("dragover", e => { e.preventDefault(); dropZone.classList.add("hover"); });
@@ -119,6 +119,21 @@
         togglePdfBtn.addEventListener("click", togglePdfPanel);
         closeResultsBtn.addEventListener("click", closeResults);
 
+        async function fetchJson(url, options) {
+            const response = await fetch(url, options);
+            const raw = await response.text();
+            let data = {};
+            try {
+                data = raw ? JSON.parse(raw) : {};
+            } catch (_) {
+                throw new Error(`Réponse invalide (${response.status})`);
+            }
+            if (!response.ok) {
+                throw new Error(data.error || `Erreur HTTP ${response.status}`);
+            }
+            return data;
+        }
+
         function handleFile(file) {
             if (!file || !file.name.endsWith(".pdf")) {
                 setStatus("⚠️ Merci de déposer un fichier PDF.", "error");
@@ -132,8 +147,7 @@
             setStatus("Envoi du fichier...", "info");
             showLoader(true);
 
-            fetch("/upload", { method: "POST", body: formData })
-                .then(r => r.json())
+            fetchJson("/upload", { method: "POST", body: formData })
                 .then(data => {
                     if (data.error) {
                         setStatus("❌ Erreur : " + data.error, "error");
@@ -141,6 +155,10 @@
                         return;
                     }
                     pollStatus(data.job_id, data.pdf_name);
+                })
+                .catch((err) => {
+                    setStatus("❌ " + err.message, "error");
+                    showLoader(false);
                 });
         }
 
@@ -151,8 +169,7 @@
             setStatus("Lancement de l'extraction depuis le PDF par défaut...", "info");
             showLoader(true);
 
-            fetch("/use-default-pdf", { method: "POST" })
-                .then(r => r.json())
+            fetchJson("/use-default-pdf", { method: "POST" })
                 .then(data => {
                     if (data.error) {
                         setStatus("❌ Erreur : " + data.error, "error");
@@ -160,6 +177,10 @@
                         return;
                     }
                     pollStatus(data.job_id, data.pdf_name);
+                })
+                .catch((err) => {
+                    setStatus("❌ " + err.message, "error");
+                    showLoader(false);
                 });
         }
 
@@ -176,21 +197,27 @@
                     showUserFeedback("Le serveur met trop de temps à répondre. Réessaie avec un PDF plus léger ou relance l'extraction.");
                     return;
                 }
-                fetch(`/status/${jobId}`)
-                    .then(r => r.json())
+                fetchJson(`/status/${jobId}`)
                     .then(data => {
                         if (data.status === "done") {
                             clearInterval(activePollInterval);
                             activePollInterval = null;
                             if (resultsClosedByUser) return;
                             showLoader(false);
-                            if (!data.produits || data.produits.length === 0) {
-                                setStatus("⚠️ Extraction terminée, mais aucun produit n'a été trouvé.", "error");
-                                showUserFeedback("Aucun résultat exploitable n'a été détecté dans ce PDF. Vérifie la qualité du PDF ou réessaie avec un autre fichier.");
-                                return;
-                            }
-                            setStatus(`✅ ${data.produits.length} produits extraits.`, "success");
-                            renderResults(data.produits, jobId, pdfName);
+                            fetchJson(`/results/${jobId}`)
+                                .then(resultData => {
+                                    const produits = resultData.produits || [];
+                                    if (!produits.length) {
+                                        setStatus("⚠️ Extraction terminée, mais aucun produit n'a été trouvé.", "error");
+                                        showUserFeedback("Aucun résultat exploitable n'a été détecté dans ce PDF. Vérifie la qualité du PDF ou réessaie avec un autre fichier.");
+                                        return;
+                                    }
+                                    setStatus(`✅ ${produits.length} produits extraits.`, "success");
+                                    renderResults(produits, jobId, pdfName);
+                                })
+                                .catch((err) => {
+                                    setStatus("❌ Impossible de charger les résultats : " + err.message, "error");
+                                });
                         } else if (data.status === "error") {
                             clearInterval(activePollInterval);
                             activePollInterval = null;
@@ -198,11 +225,15 @@
                             setStatus("❌ Erreur : " + data.error, "error");
                         }
                     })
-                    .catch(() => {
-                        clearInterval(activePollInterval);
-                        activePollInterval = null;
-                        showLoader(false);
-                        setStatus("❌ Impossible de récupérer le statut du job.", "error");
+                    .catch((err) => {
+                        // Tolère les erreurs transitoires réseau/proxy en continuant le polling.
+                        setStatus("⚠️ Problème temporaire de statut, nouvelle tentative...", "info");
+                        if (Date.now() - pollStartedAt > CLIENT_POLL_TIMEOUT_MS) {
+                            clearInterval(activePollInterval);
+                            activePollInterval = null;
+                            showLoader(false);
+                            setStatus("❌ Impossible de récupérer le statut du job : " + err.message, "error");
+                        }
                     });
             }, 2000);
         }
