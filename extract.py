@@ -527,7 +527,8 @@ Pourquoi :
 # gemini-2.0-flash
 # gemini-2.0-flash-lite
 DEFAULT_GEMINI_MODEL = "gemini-2.5-flash-lite"
-DEFAULT_MAX_OUTPUT_TOKENS = 65536
+DEFAULT_MAX_OUTPUT_TOKENS = 8192
+DEFAULT_GEMINI_HTTP_TIMEOUT_SECONDS = 120
 DEFAULT_RENDER_DPI = 220
 DEFAULT_YOLO_MODEL = "yolov8n.pt"
 DEFAULT_YOLO_CONF = 0.15
@@ -836,6 +837,11 @@ def call_gemini_pdf(api_key: str, pdf_b64: str) -> dict:
     except ValueError:
         max_tokens = DEFAULT_MAX_OUTPUT_TOKENS
     max_tokens = max(1024, min(max_tokens, 65536))
+    try:
+        http_timeout = int(os.environ.get("GEMINI_HTTP_TIMEOUT_SECONDS", str(DEFAULT_GEMINI_HTTP_TIMEOUT_SECONDS)))
+    except ValueError:
+        http_timeout = DEFAULT_GEMINI_HTTP_TIMEOUT_SECONDS
+    http_timeout = max(30, min(http_timeout, 300))
 
     payload = {
         "contents": [
@@ -866,13 +872,23 @@ def call_gemini_pdf(api_key: str, pdf_b64: str) -> dict:
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=300) as resp:
+        with urllib.request.urlopen(req, timeout=http_timeout) as resp:
             result = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         error_body = e.read().decode("utf-8")
         print(f"  [erreur HTTP {e.code}] {error_body}")
         return {
             "error": _format_gemini_http_error(e.code, error_body),
+            "produits": []
+        }
+    except urllib.error.URLError as e:
+        return {
+            "error": f"Erreur réseau Gemini: {e}",
+            "produits": []
+        }
+    except TimeoutError:
+        return {
+            "error": f"Timeout Gemini après {http_timeout}s.",
             "produits": []
         }
 

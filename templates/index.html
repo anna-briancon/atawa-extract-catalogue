@@ -103,6 +103,7 @@
         let isTopPanelCollapsed = false;
         let activePollInterval = null;
         let resultsClosedByUser = false;
+        const CLIENT_POLL_TIMEOUT_MS = 5 * 60 * 1000;
 
         dropZone.addEventListener("click", () => fileInput.click());
         dropZone.addEventListener("dragover", e => { e.preventDefault(); dropZone.classList.add("hover"); });
@@ -165,7 +166,16 @@
         function pollStatus(jobId, pdfName) {
             setStatus("Extraction en cours, ça peut prendre une minute...", "info");
             if (activePollInterval) clearInterval(activePollInterval);
+            const pollStartedAt = Date.now();
             activePollInterval = setInterval(() => {
+                if (Date.now() - pollStartedAt > CLIENT_POLL_TIMEOUT_MS) {
+                    clearInterval(activePollInterval);
+                    activePollInterval = null;
+                    showLoader(false);
+                    setStatus("❌ Timeout côté interface. Le traitement est trop long.", "error");
+                    showUserFeedback("Le serveur met trop de temps à répondre. Réessaie avec un PDF plus léger ou relance l'extraction.");
+                    return;
+                }
                 fetch(`/status/${jobId}`)
                     .then(r => r.json())
                     .then(data => {
@@ -187,6 +197,12 @@
                             showLoader(false);
                             setStatus("❌ Erreur : " + data.error, "error");
                         }
+                    })
+                    .catch(() => {
+                        clearInterval(activePollInterval);
+                        activePollInterval = null;
+                        showLoader(false);
+                        setStatus("❌ Impossible de récupérer le statut du job.", "error");
                     });
             }, 2000);
         }

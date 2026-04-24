@@ -1,5 +1,5 @@
 from flask import Flask, render_template, request, jsonify, send_file, send_from_directory
-import os, uuid, threading
+import os, uuid, threading, time
 from pathlib import Path
 from extract import extract_catalogue
 from dotenv import load_dotenv
@@ -13,6 +13,7 @@ UPLOAD_FOLDER.mkdir(exist_ok=True)
 RESULTS_FOLDER.mkdir(exist_ok=True)
 
 jobs = {}  # stocke l'état des extractions en cours
+JOB_TIMEOUT_SECONDS = int(os.getenv("EXTRACTION_JOB_TIMEOUT_SECONDS", "240"))
 
 
 def get_default_pdf_path():
@@ -35,18 +36,35 @@ def start_extraction(pdf_path: Path):
         "error": None,
         "pdf_path": str(pdf_path.resolve()),
         "pdf_name": pdf_path.name,
+        "started_at": time.time(),
+        "timeout_seconds": JOB_TIMEOUT_SECONDS,
     }
 
     def run():
         try:
             produits = extract_catalogue(str(pdf_path), api_key, str(output_dir))
-            jobs[job_id]["status"] = "done"
-            jobs[job_id]["produits"] = produits
+            # Si le watchdog a déjà expiré le job, on ne l'écrase pas.
+            if jobs.get(job_id, {}).get("status") == "en cours":
+                jobs[job_id]["status"] = "done"
+                jobs[job_id]["produits"] = produits
         except Exception as e:
             jobs[job_id]["status"] = "error"
             jobs[job_id]["error"] = str(e)
 
+    def watchdog():
+        time.sleep(JOB_TIMEOUT_SECONDS)
+        job = jobs.get(job_id)
+        if not job:
+            return
+        if job.get("status") == "en cours":
+            job["status"] = "error"
+            job["error"] = (
+                f"Extraction interrompue après {JOB_TIMEOUT_SECONDS}s (timeout). "
+                "Réessaie avec un PDF plus petit ou baisse la charge Gemini."
+            )
+
     threading.Thread(target=run, daemon=True).start()
+    threading.Thread(target=watchdog, daemon=True).start()
     return job_id, None
 
 @app.route("/")
@@ -88,7 +106,13 @@ def use_default_pdf():
 
 @app.route("/status/<job_id>")
 def status(job_id):
-    return jsonify(jobs.get(job_id, {"status": "inconnu"}))
+    job = jobs.get(job_id)
+    if not job:
+        return jsonify({"status": "inconnu"})
+    started_at = job.get("started_at")
+    if isinstance(started_at, (int, float)):
+        job["elapsed_seconds"] = int(max(0, time.time() - started_at))
+    return jsonify(job)
 
 @app.route("/images/<path:filename>")
 def serve_image(filename):
