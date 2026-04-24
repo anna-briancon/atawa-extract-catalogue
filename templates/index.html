@@ -103,7 +103,8 @@
         let isTopPanelCollapsed = false;
         let activePollInterval = null;
         let resultsClosedByUser = false;
-        const CLIENT_POLL_TIMEOUT_MS = 4 * 60 * 1000;
+        const DEFAULT_CLIENT_POLL_TIMEOUT_MS = 4 * 60 * 1000;
+        const CLIENT_TIMEOUT_SAFETY_BUFFER_MS = 30 * 1000;
 
         dropZone.addEventListener("click", () => fileInput.click());
         dropZone.addEventListener("dragover", e => { e.preventDefault(); dropZone.classList.add("hover"); });
@@ -188,8 +189,9 @@
             setStatus("Extraction en cours, ça peut prendre une minute...", "info");
             if (activePollInterval) clearInterval(activePollInterval);
             const pollStartedAt = Date.now();
+            let clientPollTimeoutMs = DEFAULT_CLIENT_POLL_TIMEOUT_MS;
             activePollInterval = setInterval(() => {
-                if (Date.now() - pollStartedAt > CLIENT_POLL_TIMEOUT_MS) {
+                if (Date.now() - pollStartedAt > clientPollTimeoutMs) {
                     clearInterval(activePollInterval);
                     activePollInterval = null;
                     showLoader(false);
@@ -199,6 +201,9 @@
                 }
                 fetchJson(`/status/${jobId}`)
                     .then(data => {
+                        if (Number.isFinite(data.timeout_seconds) && data.timeout_seconds > 0) {
+                            clientPollTimeoutMs = (data.timeout_seconds * 1000) + CLIENT_TIMEOUT_SAFETY_BUFFER_MS;
+                        }
                         if (data.status === "done") {
                             clearInterval(activePollInterval);
                             activePollInterval = null;
@@ -228,7 +233,7 @@
                     .catch((err) => {
                         // Tolère les erreurs transitoires réseau/proxy en continuant le polling.
                         setStatus("⚠️ Problème temporaire de statut, nouvelle tentative...", "info");
-                        if (Date.now() - pollStartedAt > CLIENT_POLL_TIMEOUT_MS) {
+                        if (Date.now() - pollStartedAt > clientPollTimeoutMs) {
                             clearInterval(activePollInterval);
                             activePollInterval = null;
                             showLoader(false);
