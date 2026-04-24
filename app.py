@@ -1,5 +1,5 @@
 from flask import Flask, render_template, request, jsonify, send_file, send_from_directory
-import os, uuid, threading, time
+import os, uuid, time, concurrent.futures, threading
 from pathlib import Path
 from extract import extract_catalogue
 from dotenv import load_dotenv
@@ -14,6 +14,34 @@ RESULTS_FOLDER.mkdir(exist_ok=True)
 
 jobs = {}  # stocke l'état des extractions en cours
 JOB_TIMEOUT_SECONDS = int(os.getenv("EXTRACTION_JOB_TIMEOUT_SECONDS", "240"))
+JOB_EXECUTOR_MAX_WORKERS = int(os.getenv("JOB_EXECUTOR_MAX_WORKERS", "2"))
+job_executor = concurrent.futures.ThreadPoolExecutor(max_workers=max(1, JOB_EXECUTOR_MAX_WORKERS))
+
+
+def _run_extraction_job(job_id: str, pdf_path: Path, output_dir: Path, api_key: str):
+    try:
+        produits = extract_catalogue(str(pdf_path), api_key, str(output_dir))
+        # Si le watchdog a déjà expiré le job, on ne l'écrase pas.
+        if jobs.get(job_id, {}).get("status") == "en cours":
+            jobs[job_id]["status"] = "done"
+            jobs[job_id]["produits"] = produits
+    except Exception as e:
+        if jobs.get(job_id):
+            jobs[job_id]["status"] = "error"
+            jobs[job_id]["error"] = str(e)
+
+
+def _watchdog_job_timeout(job_id: str):
+    time.sleep(JOB_TIMEOUT_SECONDS)
+    job = jobs.get(job_id)
+    if not job:
+        return
+    if job.get("status") == "en cours":
+        job["status"] = "error"
+        job["error"] = (
+            f"Extraction interrompue après {JOB_TIMEOUT_SECONDS}s (timeout). "
+            "Réessaie avec un PDF plus petit ou baisse la charge Gemini."
+        )
 
 
 def get_default_pdf_path():
@@ -40,31 +68,9 @@ def start_extraction(pdf_path: Path):
         "timeout_seconds": JOB_TIMEOUT_SECONDS,
     }
 
-    def run():
-        try:
-            produits = extract_catalogue(str(pdf_path), api_key, str(output_dir))
-            # Si le watchdog a déjà expiré le job, on ne l'écrase pas.
-            if jobs.get(job_id, {}).get("status") == "en cours":
-                jobs[job_id]["status"] = "done"
-                jobs[job_id]["produits"] = produits
-        except Exception as e:
-            jobs[job_id]["status"] = "error"
-            jobs[job_id]["error"] = str(e)
-
-    def watchdog():
-        time.sleep(JOB_TIMEOUT_SECONDS)
-        job = jobs.get(job_id)
-        if not job:
-            return
-        if job.get("status") == "en cours":
-            job["status"] = "error"
-            job["error"] = (
-                f"Extraction interrompue après {JOB_TIMEOUT_SECONDS}s (timeout). "
-                "Réessaie avec un PDF plus petit ou baisse la charge Gemini."
-            )
-
-    threading.Thread(target=run, daemon=True).start()
-    threading.Thread(target=watchdog, daemon=True).start()
+    job_executor.submit(_run_extraction_job, job_id, pdf_path, output_dir, api_key)
+    watchdog_thread = threading.Thread(target=_watchdog_job_timeout, args=(job_id,), daemon=True)
+    watchdog_thread.start()
     return job_id, None
 
 @app.route("/")
