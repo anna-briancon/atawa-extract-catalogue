@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Extraction catalogue</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+
+<body>
+    <div class="container">
+        <h1>Extraction catalogue PDF</h1>
+        <div id="topPanel" class="top-panel">
+            <p class="subtitle">Choisis un PDF (upload ou PDF par défaut) pour extraire automatiquement les produits.</p>
+
+            <div class="default-pdf-card">
+                <p><strong>PDF par défaut :</strong> <span id="defaultPdfName">{{ default_pdf_name or "Aucun PDF disponible dans le dossier" }}</span></p>
+                <button id="useDefaultBtn" class="default-btn" {% if not default_pdf_name %}disabled{% endif %}>Utiliser le PDF par défaut</button>
+            </div>
+
+            <div class="drop-zone" id="dropZone">
+                <p>Glisse ton PDF ici<br><span>ou clique pour choisir un fichier</span></p>
+                <input type="file" id="fileInput" accept=".pdf" hidden>
+            </div>
+
+            <div id="status" class="status hidden"></div>
+            <div id="loader" class="loader hidden"></div>
+            <div id="userFeedback" class="user-feedback hidden"></div>
+        </div>
+
+        <button id="toggleTopPanelBtn" class="toggle-top-panel-btn hidden" aria-label="Afficher ou masquer le panneau d'upload" title="Afficher le panneau d'upload">
+            <span class="toggle-top-panel-icon" aria-hidden="true"></span>
+        </button>
+
+        <div id="results" class="hidden">
+            <div class="results-toolbar">
+                <div class="results-heading">
+                    <h2 class="results-title">Résultats</h2>
+                    <p id="resultsSummary" class="results-summary hidden"></p>
+                </div>
+                <div class="results-actions">
+                    <button id="togglePdfBtn" class="toggle-pdf-btn">Masquer le PDF</button>
+                    <button id="closeResultsBtn" class="close-results-btn" title="Fermer les résultats" aria-label="Fermer les résultats">✕</button>
+                </div>
+            </div>
+
+            <div id="resultsLayout" class="results-layout">
+                <aside id="pdfPanel" class="pdf-panel">
+                    <p class="selected-pdf">Fichier : <strong id="selectedPdfName">—</strong></p>
+                    <div class="pdf-viewer">
+                        <iframe id="pdfViewer" title="Aperçu du PDF"></iframe>
+                    </div>
+                </aside>
+
+                <section class="results-main">
+                    <div class="tabs">
+                        <button class="tab active" onclick="showTab('tableau', this)">Tableau produits</button>
+                        <button class="tab" onclick="showTab('json', this)">JSON brut</button>
+                    </div>
+
+            <div id="tableau" class="tab-content">
+                <table id="produitsTable">
+                    <thead>
+                        <tr>
+                          <th>Image</th>
+                          <th>Produit</th>
+                          <th>Prix</th>
+                          <th>Prix unitaire</th>
+                          <th>Conditionnement</th>
+                          <th>Promo</th>
+                          <th>Rayon</th>
+                          <th>Enseigne</th>
+                          <th>Dates</th>
+                          <th>Page</th>
+                        </tr>
+                      </thead>
+                    <tbody id="tbody"></tbody>
+                </table>
+            </div>
+
+            <div id="json" class="tab-content hidden">
+                <pre id="jsonOutput"></pre>
+            </div>
+                </section>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const dropZone = document.getElementById("dropZone");
+        const fileInput = document.getElementById("fileInput");
+        const useDefaultBtn = document.getElementById("useDefaultBtn");
+        const pdfViewer = document.getElementById("pdfViewer");
+        const pdfPanel = document.getElementById("pdfPanel");
+        const topPanel = document.getElementById("topPanel");
+        const toggleTopPanelBtn = document.getElementById("toggleTopPanelBtn");
+        const togglePdfBtn = document.getElementById("togglePdfBtn");
+        const closeResultsBtn = document.getElementById("closeResultsBtn");
+        const resultsSummary = document.getElementById("resultsSummary");
+        const userFeedback = document.getElementById("userFeedback");
+        const resultsLayout = document.getElementById("resultsLayout");
+        let isPdfVisible = true;
+        let isTopPanelCollapsed = false;
+        let activePollInterval = null;
+        let resultsClosedByUser = false;
+
+        dropZone.addEventListener("click", () => fileInput.click());
+        dropZone.addEventListener("dragover", e => { e.preventDefault(); dropZone.classList.add("hover"); });
+        dropZone.addEventListener("dragleave", () => dropZone.classList.remove("hover"));
+        dropZone.addEventListener("drop", e => {
+            e.preventDefault();
+            dropZone.classList.remove("hover");
+            handleFile(e.dataTransfer.files[0]);
+        });
+        fileInput.addEventListener("change", () => handleFile(fileInput.files[0]));
+        useDefaultBtn.addEventListener("click", useDefaultPdf);
+        toggleTopPanelBtn.addEventListener("click", toggleTopPanel);
+        togglePdfBtn.addEventListener("click", togglePdfPanel);
+        closeResultsBtn.addEventListener("click", closeResults);
+
+        function handleFile(file) {
+            if (!file || !file.name.endsWith(".pdf")) {
+                setStatus("⚠️ Merci de déposer un fichier PDF.", "error");
+                return;
+            }
+            clearUserFeedback();
+            resultsClosedByUser = false;
+            resetResults();
+            const formData = new FormData();
+            formData.append("pdf", file);
+            setStatus("Envoi du fichier...", "info");
+            showLoader(true);
+
+            fetch("/upload", { method: "POST", body: formData })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.error) {
+                        setStatus("❌ Erreur : " + data.error, "error");
+                        showLoader(false);
+                        return;
+                    }
+                    pollStatus(data.job_id, data.pdf_name);
+                });
+        }
+
+        function useDefaultPdf() {
+            clearUserFeedback();
+            resultsClosedByUser = false;
+            resetResults();
+            setStatus("Lancement de l'extraction depuis le PDF par défaut...", "info");
+            showLoader(true);
+
+            fetch("/use-default-pdf", { method: "POST" })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.error) {
+                        setStatus("❌ Erreur : " + data.error, "error");
+                        showLoader(false);
+                        return;
+                    }
+                    pollStatus(data.job_id, data.pdf_name);
+                });
+        }
+
+        function pollStatus(jobId, pdfName) {
+            setStatus("Extraction en cours, ça peut prendre une minute...", "info");
+            if (activePollInterval) clearInterval(activePollInterval);
+            activePollInterval = setInterval(() => {
+                fetch(`/status/${jobId}`)
+                    .then(r => r.json())
+                    .then(data => {
+                        if (data.status === "done") {
+                            clearInterval(activePollInterval);
+                            activePollInterval = null;
+                            if (resultsClosedByUser) return;
+                            showLoader(false);
+                            if (!data.produits || data.produits.length === 0) {
+                                setStatus("⚠️ Extraction terminée, mais aucun produit n'a été trouvé.", "error");
+                                showUserFeedback("Aucun résultat exploitable n'a été détecté dans ce PDF. Vérifie la qualité du PDF ou réessaie avec un autre fichier.");
+                                return;
+                            }
+                            setStatus(`✅ ${data.produits.length} produits extraits.`, "success");
+                            renderResults(data.produits, jobId, pdfName);
+                        } else if (data.status === "error") {
+                            clearInterval(activePollInterval);
+                            activePollInterval = null;
+                            showLoader(false);
+                            setStatus("❌ Erreur : " + data.error, "error");
+                        }
+                    });
+            }, 2000);
+        }
+
+        function renderResults(produits, jobId, pdfName) {
+            document.getElementById("results").classList.remove("hidden");
+            document.body.classList.add("has-results");
+            setTopPanelCollapsed(true);
+            document.getElementById("jsonOutput").textContent = JSON.stringify(produits, null, 2);
+            document.getElementById("selectedPdfName").textContent = pdfName || "PDF";
+            pdfViewer.src = `/pdf/${jobId}`;
+
+            const tbody = document.getElementById("tbody");
+            tbody.innerHTML = "";
+            produits.forEach(p => {
+                const tr = document.createElement("tr");
+                const imgSrc = p.image_path ? `/images/${jobId}/${p.image_path}` : "";
+                tr.innerHTML = `
+                    <td>${imgSrc ? `<img src="${imgSrc}" class="prod-img">` : "—"}</td>
+                    <td><strong>${p.nom_produit || "—"}</strong><br><small>${p.description || ""}</small></td>
+                    <td>${p.prix ? p.prix + " €" : "—"}</td>
+                    <td>${p.prix_unitaire ? p.prix_unitaire + " €" : "—"}</td>
+                    <td>${p.conditionnement || "—"}</td>
+                    <td>${p.promo_description || "—"}</td>
+                    <td>${p.rayon || "—"}</td>
+                    <td>${p.enseigne || "—"}</td>
+                    <td>${p.date_debut || "—"} → ${p.date_fin || "—"}</td>
+                    <td>${p._page || "—"}</td>
+                    `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function resetResults() {
+            document.getElementById("results").classList.add("hidden");
+            document.body.classList.remove("has-results");
+            setTopPanelCollapsed(false);
+            document.getElementById("tbody").innerHTML = "";
+            document.getElementById("jsonOutput").textContent = "";
+            document.getElementById("selectedPdfName").textContent = "—";
+            resultsSummary.textContent = "";
+            resultsSummary.classList.add("hidden");
+            pdfViewer.src = "";
+            isPdfVisible = true;
+            pdfPanel.classList.remove("hidden");
+            resultsLayout.classList.remove("pdf-hidden");
+            togglePdfBtn.textContent = "Masquer le PDF";
+        }
+
+        function setTopPanelCollapsed(collapsed) {
+            isTopPanelCollapsed = collapsed;
+            topPanel.classList.toggle("collapsed", collapsed);
+            toggleTopPanelBtn.classList.toggle("hidden", !document.body.classList.contains("has-results"));
+            toggleTopPanelBtn.classList.toggle("expanded", !collapsed);
+            toggleTopPanelBtn.title = collapsed ? "Afficher les options" : "Masquer les options";
+        }
+
+        function toggleTopPanel() {
+            setTopPanelCollapsed(!isTopPanelCollapsed);
+        }
+
+        function closeResults() {
+            resultsClosedByUser = true;
+            if (activePollInterval) {
+                clearInterval(activePollInterval);
+                activePollInterval = null;
+            }
+            resetResults();
+            showLoader(false);
+            clearUserFeedback();
+            const status = document.getElementById("status");
+            status.textContent = "";
+            status.className = "status hidden";
+        }
+
+        function togglePdfPanel() {
+            isPdfVisible = !isPdfVisible;
+            pdfPanel.classList.toggle("hidden", !isPdfVisible);
+            resultsLayout.classList.toggle("pdf-hidden", !isPdfVisible);
+            togglePdfBtn.textContent = isPdfVisible ? "Masquer le PDF" : "Afficher le PDF";
+        }
+
+        function showTab(name, clickedTab) {
+            document.querySelectorAll(".tab-content").forEach(el => el.classList.add("hidden"));
+            document.querySelectorAll(".tab").forEach(el => el.classList.remove("active"));
+            document.getElementById(name).classList.remove("hidden");
+            clickedTab.classList.add("active");
+        }
+
+        function setStatus(msg, type) {
+            const el = document.getElementById("status");
+            if (type === "success") {
+                resultsSummary.textContent = msg;
+                resultsSummary.classList.remove("hidden");
+                el.textContent = "";
+                el.className = "status hidden";
+                return;
+            }
+            resultsSummary.textContent = "";
+            resultsSummary.classList.add("hidden");
+            el.textContent = msg;
+            el.className = "status " + type;
+        }
+
+        function showLoader(show) {
+            document.getElementById("loader").classList.toggle("hidden", !show);
+        }
+
+        function showUserFeedback(message) {
+            userFeedback.textContent = message;
+            userFeedback.classList.remove("hidden");
+        }
+
+        function clearUserFeedback() {
+            userFeedback.textContent = "";
+            userFeedback.classList.add("hidden");
+        }
+    </script>
+</body>
+
+</html>
