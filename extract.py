@@ -5,6 +5,9 @@ import base64
 import urllib.request
 import urllib.error
 import getpass
+import random
+import time
+import gc
 from pathlib import Path
 
 def _python_inside_venv(venv_root: Path) -> Path:
@@ -532,14 +535,47 @@ DEFAULT_GEMINI_HTTP_TIMEOUT_SECONDS = 240
 DEFAULT_RENDER_DPI = 220
 DEFAULT_YOLO_MODEL = "yolov8n.pt"
 DEFAULT_YOLO_CONF = 0.15
+DEFAULT_GEMINI_RETRY_MAX_ATTEMPTS = 4
 
 # region YOLO / IMAGES
 
-def render_pdf_pages(pdf_path: Path, output_dir: Path, dpi: int = DEFAULT_RENDER_DPI) -> dict[int, Path]:
+def _get_render_dpi() -> int:
+    try:
+        dpi = int(os.environ.get("EXTRACT_RENDER_DPI", str(DEFAULT_RENDER_DPI)))
+    except ValueError:
+        dpi = DEFAULT_RENDER_DPI
+    return max(100, min(dpi, 300))
+
+
+def _is_local_runtime() -> bool:
+    flask_env = os.environ.get("FLASK_ENV", "").strip().lower()
+    app_env = os.environ.get("APP_ENV", "").strip().lower()
+    render_service = os.environ.get("RENDER", "").strip()
+    if render_service:
+        return False
+    if flask_env == "development" or app_env == "local":
+        return True
+    return os.environ.get("PYTHON_ENV", "").strip().lower() in {"development", "local"}
+
+
+def _should_enable_yolo() -> bool:
     """
-    Rend chaque page du PDF en PNG.
+    Active YOLO par défaut en local, désactivé hors local.
+    Possibilité de forcer via ENABLE_YOLO=true/false.
+    """
+    explicit = os.environ.get("ENABLE_YOLO")
+    if explicit is not None:
+        return explicit.strip().lower() in {"1", "true", "yes", "on"}
+    return _is_local_runtime()
+
+
+def render_selected_pdf_pages(pdf_path: Path, output_dir: Path, page_numbers: list[int], dpi: int | None = None) -> dict[int, Path]:
+    """
+    Rend uniquement les pages demandées du PDF en PNG.
     Retourne {page_num: path_png}.
     """
+    if dpi is None:
+        dpi = _get_render_dpi()
     pages_dir = output_dir / "pages_png"
     pages_dir.mkdir(parents=True, exist_ok=True)
 
@@ -547,13 +583,18 @@ def render_pdf_pages(pdf_path: Path, output_dir: Path, dpi: int = DEFAULT_RENDER
     zoom = dpi / 72.0
     matrix = fitz.Matrix(zoom, zoom)
 
+    wanted = sorted({int(p) for p in page_numbers if isinstance(p, int) and p >= 1})
     page_map = {}
-    for i in range(len(doc)):
-        page_num = i + 1
+    for page_num in wanted:
+        i = page_num - 1
+        if i < 0 or i >= len(doc):
+            continue
         out_path = pages_dir / f"page_{page_num:03d}.png"
         if not out_path.exists():
-            pix = doc[i].get_pixmap(matrix=matrix, alpha=False)
+            pix = doc.load_page(i).get_pixmap(matrix=matrix, alpha=False)
             pix.save(str(out_path))
+            del pix
+            gc.collect()
         page_map[page_num] = out_path
 
     doc.close()
@@ -695,6 +736,9 @@ def assign_yolo_images_to_products(produits: list, page_map: dict[int, Path], ou
     """
     if not produits:
         return produits
+    if not _should_enable_yolo():
+        print("[yolo] Désactivé (runtime non local ou ENABLE_YOLO=false).")
+        return produits
 
     yolo_model = load_yolo_model()
     images_dir = output_dir / "images_yolo"
@@ -766,6 +810,8 @@ def assign_yolo_images_to_products(produits: list, page_map: dict[int, Path], ou
             if ok:
                 produit["image_path"] = str(crop_path.relative_to(output_dir)).replace("\\", "/")
 
+    del yolo_model
+    gc.collect()
     return produits
 
 # endregion
@@ -829,8 +875,11 @@ def _format_gemini_http_error(http_code: int, error_body: str) -> str:
 
 
 def call_gemini_pdf(api_key: str, pdf_b64: str) -> dict:
-    model = os.environ.get("GEMINI_MODEL", DEFAULT_GEMINI_MODEL).strip()
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+    primary_model = os.environ.get("GEMINI_MODEL", DEFAULT_GEMINI_MODEL).strip()
+    fallback_model = os.environ.get("GEMINI_FALLBACK_MODEL", "").strip()
+    models_to_try = [primary_model]
+    if fallback_model and fallback_model != primary_model:
+        models_to_try.append(fallback_model)
 
     try:
         max_tokens = int(os.environ.get("EXTRACT_MAX_OUTPUT_TOKENS", str(DEFAULT_MAX_OUTPUT_TOKENS)))
@@ -843,75 +892,118 @@ def call_gemini_pdf(api_key: str, pdf_b64: str) -> dict:
         http_timeout = DEFAULT_GEMINI_HTTP_TIMEOUT_SECONDS
     http_timeout = max(30, min(http_timeout, 300))
 
-    payload = {
-        "contents": [
-            {
-                "parts": [
-                    {"text": PROMPT},
+    try:
+        max_attempts = int(
+            os.environ.get("GEMINI_RETRY_MAX_ATTEMPTS", str(DEFAULT_GEMINI_RETRY_MAX_ATTEMPTS))
+        )
+    except ValueError:
+        max_attempts = DEFAULT_GEMINI_RETRY_MAX_ATTEMPTS
+    max_attempts = max(1, min(max_attempts, 8))
+
+    retryable_http_codes = {429, 500, 502, 503, 504}
+    last_error_message = ""
+
+    for model in models_to_try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+        for attempt in range(1, max_attempts + 1):
+            payload = {
+                "contents": [
                     {
-                        "inline_data": {
-                            "mime_type": "application/pdf",
-                            "data": pdf_b64
-                        }
+                        "parts": [
+                            {"text": PROMPT},
+                            {
+                                "inline_data": {
+                                    "mime_type": "application/pdf",
+                                    "data": pdf_b64
+                                }
+                            }
+                        ]
                     }
-                ]
+                ],
+                "generationConfig": {
+                    "temperature": 0.1,
+                    "maxOutputTokens": max_tokens
+                }
             }
-        ],
-        "generationConfig": {
-            "temperature": 0.1,
-            "maxOutputTokens": max_tokens
-        }
+
+            data = json.dumps(payload).encode("utf-8")
+            req = urllib.request.Request(
+                url,
+                data=data,
+                headers={"Content-Type": "application/json"},
+                method="POST"
+            )
+
+            try:
+                with urllib.request.urlopen(req, timeout=http_timeout) as resp:
+                    result = json.loads(resp.read().decode("utf-8"))
+            except urllib.error.HTTPError as e:
+                error_body = e.read().decode("utf-8")
+                print(f"  [erreur HTTP {e.code}] {error_body}")
+                formatted = _format_gemini_http_error(e.code, error_body)
+                last_error_message = formatted
+
+                if e.code in retryable_http_codes and attempt < max_attempts:
+                    # Backoff exponentiel + jitter pour lisser les pics de charge Gemini.
+                    sleep_seconds = min(20.0, (2 ** (attempt - 1)) + random.uniform(0.0, 0.7))
+                    print(
+                        f"  [retry] modèle={model} tentative {attempt}/{max_attempts} "
+                        f"après erreur HTTP {e.code}, pause {sleep_seconds:.1f}s"
+                    )
+                    time.sleep(sleep_seconds)
+                    continue
+
+                break
+            except urllib.error.URLError as e:
+                last_error_message = f"Erreur réseau Gemini: {e}"
+                if attempt < max_attempts:
+                    sleep_seconds = min(20.0, (2 ** (attempt - 1)) + random.uniform(0.0, 0.7))
+                    print(
+                        f"  [retry] modèle={model} tentative {attempt}/{max_attempts} "
+                        f"après erreur réseau, pause {sleep_seconds:.1f}s"
+                    )
+                    time.sleep(sleep_seconds)
+                    continue
+                break
+            except TimeoutError:
+                last_error_message = f"Timeout Gemini après {http_timeout}s."
+                if attempt < max_attempts:
+                    sleep_seconds = min(20.0, (2 ** (attempt - 1)) + random.uniform(0.0, 0.7))
+                    print(
+                        f"  [retry] modèle={model} tentative {attempt}/{max_attempts} "
+                        f"après timeout, pause {sleep_seconds:.1f}s"
+                    )
+                    time.sleep(sleep_seconds)
+                    continue
+                break
+
+            try:
+                cand = result["candidates"][0]
+                if cand.get("finishReason") and cand["finishReason"] != "STOP":
+                    print(f"  [attention] finishReason={cand['finishReason']} — la réponse peut être incomplète.")
+                text = cand["content"]["parts"][0]["text"].strip()
+                if text.startswith("```"):
+                    text = text.split("\n", 1)[-1]
+                    text = text.rsplit("```", 1)[0].strip()
+                if os.environ.get("EXTRACT_DEBUG"):
+                    print(f"\n  RÉPONSE BRUTE GEMINI :\n{text}\n")
+                parsed = json.loads(text)
+                if isinstance(parsed, list):
+                    return {"produits": parsed}
+                if isinstance(parsed, dict):
+                    return parsed
+                return {"produits": []}
+            except (KeyError, json.JSONDecodeError, IndexError) as e:
+                print(f"  [erreur parsing] {e}")
+                print(f"  Réponse brute : {result}")
+                return {"produits": []}
+
+    if not last_error_message:
+        last_error_message = "Erreur inconnue Gemini."
+    return {
+        "error": last_error_message,
+        "produits": []
     }
-
-    data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        url,
-        data=data,
-        headers={"Content-Type": "application/json"},
-        method="POST"
-    )
-
-    try:
-        with urllib.request.urlopen(req, timeout=http_timeout) as resp:
-            result = json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        error_body = e.read().decode("utf-8")
-        print(f"  [erreur HTTP {e.code}] {error_body}")
-        return {
-            "error": _format_gemini_http_error(e.code, error_body),
-            "produits": []
-        }
-    except urllib.error.URLError as e:
-        return {
-            "error": f"Erreur réseau Gemini: {e}",
-            "produits": []
-        }
-    except TimeoutError:
-        return {
-            "error": f"Timeout Gemini après {http_timeout}s.",
-            "produits": []
-        }
-
-    try:
-        cand = result["candidates"][0]
-        if cand.get("finishReason") and cand["finishReason"] != "STOP":
-            print(f"  [attention] finishReason={cand['finishReason']} — la réponse peut être incomplète.")
-        text = cand["content"]["parts"][0]["text"].strip()
-        if text.startswith("```"):
-            text = text.split("\n", 1)[-1]
-            text = text.rsplit("```", 1)[0].strip()
-        if os.environ.get("EXTRACT_DEBUG"):
-            print(f"\n  RÉPONSE BRUTE GEMINI :\n{text}\n")
-        parsed = json.loads(text)
-        if isinstance(parsed, list):
-            return {"produits": parsed}
-        if isinstance(parsed, dict):
-            return parsed
-        return {"produits": []}
-    except (KeyError, json.JSONDecodeError, IndexError) as e:
-        print(f"  [erreur parsing] {e}")
-        print(f"  Réponse brute : {result}")
-        return {"produits": []}
 
 # Fonction principale qui extrait les produits du catalogue
 def extract_catalogue(pdf_path: str, api_key: str, output_dir: str):
@@ -943,8 +1035,13 @@ def extract_catalogue(pdf_path: str, api_key: str, output_dir: str):
     if not isinstance(produits, list):
         produits = []
     _normalize_products(produits)
-    print(f"\n[images] Rendu des pages PDF...")
-    page_map = render_pdf_pages(pdf_path, output_dir)
+    pages_with_products = sorted({
+        int(p.get("_page"))
+        for p in produits
+        if isinstance(p, dict) and p.get("_page") is not None
+    })
+    print(f"\n[images] Rendu des pages PDF utiles ({len(pages_with_products)} pages)...")
+    page_map = render_selected_pdf_pages(pdf_path, output_dir, pages_with_products)
 
     print(f"[images] Détection YOLO + crops...")
     produits = assign_yolo_images_to_products(produits, page_map, output_dir)

@@ -75,6 +75,11 @@ def index():
         default_pdf_name=default_pdf.name if default_pdf else None,
     )
 
+
+@app.route("/health")
+def health():
+    return jsonify({"status": "ok"}), 200
+
 @app.route("/upload", methods=["POST"])
 def upload():
     f = request.files.get("pdf")
