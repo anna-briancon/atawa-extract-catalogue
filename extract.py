@@ -536,6 +536,9 @@ DEFAULT_RENDER_DPI = 220
 DEFAULT_YOLO_MODEL = "yolov8n.pt"
 DEFAULT_YOLO_CONF = 0.15
 DEFAULT_GEMINI_RETRY_MAX_ATTEMPTS = 4
+DEFAULT_FITZ_MIN_IMAGE_BYTES = 15000
+DEFAULT_FITZ_MIN_DECODED_SIDE_PX = 32
+DEFAULT_FITZ_MIN_GRAY_STD = 8.0
 
 # region YOLO / IMAGES
 
@@ -545,6 +548,51 @@ def _get_render_dpi() -> int:
     except ValueError:
         dpi = DEFAULT_RENDER_DPI
     return max(100, min(dpi, 300))
+
+
+def _get_fitz_min_image_bytes() -> int:
+    try:
+        return max(0, int(os.environ.get("FITZ_MIN_IMAGE_BYTES", str(DEFAULT_FITZ_MIN_IMAGE_BYTES))))
+    except ValueError:
+        return DEFAULT_FITZ_MIN_IMAGE_BYTES
+
+
+def _get_fitz_min_gray_std() -> float:
+    try:
+        return max(0.0, float(os.environ.get("FITZ_MIN_GRAY_STD", str(DEFAULT_FITZ_MIN_GRAY_STD))))
+    except ValueError:
+        return DEFAULT_FITZ_MIN_GRAY_STD
+
+
+def _is_usable_embedded_image(image_bytes: bytes) -> bool:
+    """
+    Rejette masques 1x1, placeholders noirs et mini-pictos embarqués dans le PDF.
+    (Les filtres géométriques sur la page ne suffisent pas : le rectangle affiché
+    peut être grand alors que le flux image est minuscule.)
+    """
+    if not image_bytes:
+        return False
+    min_bytes = _get_fitz_min_image_bytes()
+    if min_bytes > 0 and len(image_bytes) < min_bytes:
+        return False
+
+    try:
+        min_side = max(1, int(os.environ.get("FITZ_MIN_DECODED_SIDE_PX", str(DEFAULT_FITZ_MIN_DECODED_SIDE_PX))))
+    except ValueError:
+        min_side = DEFAULT_FITZ_MIN_DECODED_SIDE_PX
+
+    arr = np.frombuffer(image_bytes, dtype=np.uint8)
+    img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    if img is None:
+        return False
+    h, w = img.shape[:2]
+    if w < min_side or h < min_side:
+        return False
+
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    if float(gray.std()) < _get_fitz_min_gray_std():
+        return False
+    return True
 
 
 def _is_local_runtime() -> bool:
@@ -599,6 +647,188 @@ def render_selected_pdf_pages(pdf_path: Path, output_dir: Path, page_numbers: li
 
     doc.close()
     return page_map
+
+
+def extract_embedded_images_from_pdf(pdf_path: Path, output_dir: Path, page_numbers: list[int]) -> dict[int, list[dict]]:
+    """
+    Extrait les images réellement embarquées dans le PDF (rapide, pas de rendu).
+    Retourne {page_num: [ {xref, bbox_pt, bbox_px, cy, area, image_path}, ... ]}
+    triés du haut vers le bas.
+    """
+    images_dir = output_dir / "images_fitz"
+    images_dir.mkdir(parents=True, exist_ok=True)
+
+    dpi = _get_render_dpi()
+    zoom = dpi / 72.0
+
+    # Filtres pour éviter d'attraper logos, pictos promo, fonds, etc.
+    try:
+        min_side_pt = float(os.environ.get("FITZ_MIN_IMAGE_SIDE_PT", "30"))
+    except ValueError:
+        min_side_pt = 30.0
+    try:
+        min_area_ratio = float(os.environ.get("FITZ_MIN_IMAGE_AREA_RATIO", "0.005"))
+    except ValueError:
+        min_area_ratio = 0.005
+
+    doc = fitz.open(pdf_path)
+    page_images: dict[int, list[dict]] = {}
+    xref_cache: dict[int, Path | None] = {}
+
+    wanted = sorted({int(p) for p in page_numbers if isinstance(p, int) and p >= 1})
+    for page_num in wanted:
+        page_index = page_num - 1
+        if page_index < 0 or page_index >= len(doc):
+            continue
+        page = doc.load_page(page_index)
+        page_w = page.rect.width
+        page_h = page.rect.height
+        page_area = page_w * page_h if page_w > 0 and page_h > 0 else 0.0
+
+        items: list[dict] = []
+        for img in page.get_images(full=True):
+            xref = img[0]
+            try:
+                rects = page.get_image_rects(xref, transform=False)
+            except Exception:
+                rects = []
+
+            if not rects:
+                continue
+
+            for rect_idx, rect in enumerate(rects):
+                w_pt = rect.width
+                h_pt = rect.height
+                if w_pt < min_side_pt or h_pt < min_side_pt:
+                    continue
+                if page_area > 0:
+                    area_ratio = (w_pt * h_pt) / page_area
+                    if area_ratio < min_area_ratio:
+                        continue
+                    # éviter de prendre un fond pleine page
+                    if area_ratio > 0.95:
+                        continue
+
+                if xref not in xref_cache:
+                    try:
+                        base_image = doc.extract_image(xref)
+                    except Exception:
+                        xref_cache[xref] = None
+                        continue
+                    image_bytes = base_image.get("image") if isinstance(base_image, dict) else None
+                    ext = base_image.get("ext", "png") if isinstance(base_image, dict) else "png"
+                    if not image_bytes or not _is_usable_embedded_image(image_bytes):
+                        xref_cache[xref] = None
+                        continue
+                    out_path = images_dir / f"x{xref}.{ext}"
+                    if out_path.exists():
+                        try:
+                            if not _is_usable_embedded_image(out_path.read_bytes()):
+                                out_path.unlink(missing_ok=True)
+                        except OSError:
+                            pass
+                    if not out_path.exists():
+                        with open(out_path, "wb") as f:
+                            f.write(image_bytes)
+                    xref_cache[xref] = out_path
+
+                cached_path = xref_cache.get(xref)
+                if cached_path is None:
+                    continue
+
+                bbox_px = [
+                    int(rect.x0 * zoom),
+                    int(rect.y0 * zoom),
+                    int(rect.x1 * zoom),
+                    int(rect.y1 * zoom),
+                ]
+                items.append({
+                    "xref": xref,
+                    "rect_index": rect_idx,
+                    "bbox_pt": [float(rect.x0), float(rect.y0), float(rect.x1), float(rect.y1)],
+                    "bbox_px": bbox_px,
+                    "cy": (rect.y0 + rect.y1) / 2.0,
+                    "area": float(w_pt * h_pt),
+                    "image_path": cached_path,
+                })
+
+        items.sort(key=lambda d: (d["cy"], -d["area"]))
+        page_images[page_num] = items
+
+    doc.close()
+    return page_images
+
+
+def assign_fitz_images_to_products(produits: list, page_fitz_images: dict[int, list[dict]], output_dir: Path) -> list:
+    """
+    Assigne les images embarquées (fitz) aux produits, page par page,
+    en suivant l'ordre haut->bas.
+    Si une page contient moins d'images embarquées que de produits,
+    on n'assigne rien sur cette page : YOLO prendra le relais.
+    """
+    if not produits:
+        return produits
+
+    produits_par_page: dict[int, list[tuple[int, dict]]] = {}
+    for idx, p in enumerate(produits):
+        if not isinstance(p, dict):
+            continue
+        pg = p.get("_page")
+        if pg is None:
+            continue
+        try:
+            pg = int(pg)
+        except Exception:
+            continue
+        produits_par_page.setdefault(pg, []).append((idx, p))
+
+    for page_num, items in produits_par_page.items():
+        available = page_fitz_images.get(page_num, [])
+        if len(available) < len(items):
+            if available:
+                print(
+                    f"[fitz] page {page_num}: {len(available)} image(s) embarquée(s) "
+                    f"pour {len(items)} produit(s) → fallback YOLO sur cette page"
+                )
+            else:
+                print(f"[fitz] page {page_num}: aucune image embarquée exploitable → fallback YOLO")
+            continue
+
+        selected = available[: len(items)]
+        skip_page = False
+        for det in selected:
+            img_path = Path(det["image_path"])
+            try:
+                if not _is_usable_embedded_image(img_path.read_bytes()):
+                    print(
+                        f"[fitz] page {page_num}: image rejetée ({img_path.name}) "
+                        f"→ fallback YOLO sur cette page"
+                    )
+                    skip_page = True
+                    break
+            except OSError:
+                print(f"[fitz] page {page_num}: image illisible → fallback YOLO sur cette page")
+                skip_page = True
+                break
+        if skip_page:
+            continue
+
+        print(
+            f"[fitz] page {page_num}: {len(selected)} image(s) embarquée(s) "
+            f"pour {len(items)} produit(s) → assignées via fitz"
+        )
+        for i, (_prod_idx, produit) in enumerate(items):
+            det = selected[i]
+            img_path = Path(det["image_path"])
+            produit["image_bbox_px"] = det["bbox_px"]
+            produit["image_source"] = "fitz"
+            try:
+                rel_path = str(img_path.relative_to(output_dir)).replace("\\", "/")
+            except ValueError:
+                rel_path = str(img_path)
+            produit["image_path"] = rel_path
+
+    return produits
 
 
 def load_yolo_model():
@@ -732,10 +962,20 @@ def assign_yolo_images_to_products(produits: list, page_map: dict[int, Path], ou
     V1 simple :
     - détecte des bbox candidates sur chaque page
     - les trie de haut en bas
-    - assigne aux produits de la page dans cet ordre
+    - assigne aux produits de la page (qui n'ont pas déjà une image fitz) dans cet ordre
     """
     if not produits:
         return produits
+
+    products_needing_image = [
+        (idx, p)
+        for idx, p in enumerate(produits)
+        if isinstance(p, dict) and not p.get("image_path")
+    ]
+    if not products_needing_image:
+        print("[yolo] Aucun produit sans image — modèle non chargé.")
+        return produits
+
     if not _should_enable_yolo():
         print("[yolo] Désactivé (runtime non local ou ENABLE_YOLO=false).")
         return produits
@@ -743,11 +983,8 @@ def assign_yolo_images_to_products(produits: list, page_map: dict[int, Path], ou
     yolo_model = load_yolo_model()
     images_dir = output_dir / "images_yolo"
 
-    # grouper les produits par page
     produits_par_page = {}
-    for idx, p in enumerate(produits):
-        if not isinstance(p, dict):
-            continue
+    for idx, p in products_needing_image:
         pg = p.get("_page")
         if pg is None:
             continue
@@ -802,6 +1039,7 @@ def assign_yolo_images_to_products(produits: list, page_map: dict[int, Path], ou
             produit["image_bbox_px"] = bbox
             produit["image_detection_label"] = det["label"]
             produit["image_detection_conf"] = round(det["conf"], 4)
+            produit["image_source"] = "yolo"
 
             slug = f"page_{page_num:03d}_{prod_idx+1:04d}"
             crop_path = images_dir / f"{slug}.png"
@@ -1040,11 +1278,22 @@ def extract_catalogue(pdf_path: str, api_key: str, output_dir: str):
         for p in produits
         if isinstance(p, dict) and p.get("_page") is not None
     })
-    print(f"\n[images] Rendu des pages PDF utiles ({len(pages_with_products)} pages)...")
-    page_map = render_selected_pdf_pages(pdf_path, output_dir, pages_with_products)
+    print(f"\n[images] Extraction des images embarquées via fitz ({len(pages_with_products)} pages)...")
+    page_fitz_images = extract_embedded_images_from_pdf(pdf_path, output_dir, pages_with_products)
+    produits = assign_fitz_images_to_products(produits, page_fitz_images, output_dir)
 
-    print(f"[images] Détection YOLO + crops...")
-    produits = assign_yolo_images_to_products(produits, page_map, output_dir)
+    missing_after_fitz = [
+        p for p in produits if isinstance(p, dict) and not p.get("image_path")
+    ]
+    if missing_after_fitz:
+        print(
+            f"[images] {len(missing_after_fitz)}/{len(produits)} produit(s) sans image embarquée "
+            f"→ rendu des pages + fallback YOLO..."
+        )
+        page_map = render_selected_pdf_pages(pdf_path, output_dir, pages_with_products)
+        produits = assign_yolo_images_to_products(produits, page_map, output_dir)
+    else:
+        print(f"[images] Toutes les images extraites via fitz ({len(produits)} produits) — YOLO non nécessaire.")
     all_results_by_page = _group_by_page(produits)
 
     pages_with_products = [

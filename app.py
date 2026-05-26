@@ -3,7 +3,7 @@ import os, uuid, time, concurrent.futures, threading
 from pathlib import Path
 from extract import extract_catalogue
 from dotenv import load_dotenv
-load_dotenv()
+load_dotenv(override=True)
 
 app = Flask(__name__)
 UPLOAD_FOLDER = Path("uploads")
@@ -13,9 +13,22 @@ UPLOAD_FOLDER.mkdir(exist_ok=True)
 RESULTS_FOLDER.mkdir(exist_ok=True)
 
 jobs = {}  # stocke l'état des extractions en cours
-JOB_TIMEOUT_SECONDS = int(os.getenv("EXTRACTION_JOB_TIMEOUT_SECONDS", "240"))
+JOB_TIMEOUT_SECONDS = int(os.getenv("EXTRACTION_JOB_TIMEOUT_SECONDS", "600"))
 JOB_EXECUTOR_MAX_WORKERS = int(os.getenv("JOB_EXECUTOR_MAX_WORKERS", "2"))
 job_executor = concurrent.futures.ThreadPoolExecutor(max_workers=max(1, JOB_EXECUTOR_MAX_WORKERS))
+
+# Avertissement si la config rend les retries Gemini inopérantes.
+try:
+    _gemini_http_timeout = int(os.getenv("GEMINI_HTTP_TIMEOUT_SECONDS", "240"))
+except ValueError:
+    _gemini_http_timeout = 240
+if JOB_TIMEOUT_SECONDS <= _gemini_http_timeout:
+    print(
+        f"[app] ATTENTION : EXTRACTION_JOB_TIMEOUT_SECONDS={JOB_TIMEOUT_SECONDS}s "
+        f"<= GEMINI_HTTP_TIMEOUT_SECONDS={_gemini_http_timeout}s. "
+        "Aucune retry Gemini ne pourra aboutir. "
+        "Augmente EXTRACTION_JOB_TIMEOUT_SECONDS dans .env."
+    )
 
 
 def _run_extraction_job(job_id: str, pdf_path: Path, output_dir: Path, api_key: str):
@@ -36,12 +49,27 @@ def _watchdog_job_timeout(job_id: str):
     job = jobs.get(job_id)
     if not job:
         return
-    if job.get("status") == "en cours":
-        job["status"] = "error"
-        job["error"] = (
-            f"Extraction interrompue après {JOB_TIMEOUT_SECONDS}s (timeout). "
-            "Réessaie avec un PDF plus petit ou baisse la charge Gemini."
-        )
+    if job.get("status") != "en cours":
+        return
+
+    started_at = job.get("started_at")
+    elapsed = int(max(0, time.time() - started_at)) if isinstance(started_at, (int, float)) else JOB_TIMEOUT_SECONDS
+
+    # On essaie d'annuler le Future en cours pour libérer le thread.
+    future = job.get("_future")
+    if future is not None:
+        try:
+            future.cancel()
+        except Exception:
+            pass
+
+    job["status"] = "error"
+    job["error"] = (
+        f"Extraction interrompue après {elapsed}s (timeout du watchdog : {JOB_TIMEOUT_SECONDS}s). "
+        "Pistes : augmente EXTRACTION_JOB_TIMEOUT_SECONDS et/ou GEMINI_HTTP_TIMEOUT_SECONDS dans .env, "
+        "essaie un modèle plus rapide via GEMINI_MODEL (ex: gemini-2.0-flash), "
+        "ou réduis la taille du PDF."
+    )
 
 
 def get_default_pdf_path():
@@ -68,7 +96,8 @@ def start_extraction(pdf_path: Path):
         "timeout_seconds": JOB_TIMEOUT_SECONDS,
     }
 
-    job_executor.submit(_run_extraction_job, job_id, pdf_path, output_dir, api_key)
+    future = job_executor.submit(_run_extraction_job, job_id, pdf_path, output_dir, api_key)
+    jobs[job_id]["_future"] = future
     watchdog_thread = threading.Thread(target=_watchdog_job_timeout, args=(job_id,), daemon=True)
     watchdog_thread.start()
     return job_id, None

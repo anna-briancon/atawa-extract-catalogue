@@ -256,8 +256,11 @@
             produits.forEach(p => {
                 const tr = document.createElement("tr");
                 const imgSrc = p.image_path ? `/images/${jobId}/${p.image_path}` : "";
+                const imgTag = imgSrc
+                    ? `<img src="${imgSrc}" class="prod-img" alt="" loading="lazy" onerror="this.replaceWith(document.createTextNode('—'))">`
+                    : "—";
                 tr.innerHTML = `
-                    <td>${imgSrc ? `<img src="${imgSrc}" class="prod-img">` : "—"}</td>
+                    <td>${imgTag}</td>
                     <td><strong>${p.nom_produit || "—"}</strong><br><small>${p.description || ""}</small></td>
                     <td>${p.prix ? p.prix + " €" : "—"}</td>
                     <td>${p.prix_unitaire ? p.prix_unitaire + " €" : "—"}</td>
