@@ -661,9 +661,9 @@ def get_key() -> str:
 
 
 def cli_pdf(script_dir: Path) -> Path | None:
-    static_pdfs = sorted(script_dir.glob("static/*.pdf"))
-    if static_pdfs:
-        return static_pdfs[0]
+    frontend_pdfs = sorted(script_dir.glob("frontend/*.pdf"))
+    if frontend_pdfs:
+        return frontend_pdfs[0]
     legacy = script_dir / "catalogue_SU.pdf"
     return legacy if legacy.exists() else None
 
@@ -1054,7 +1054,7 @@ def assign_yolo(produits: list, page_map: dict[int, Path], output_dir: Path) -> 
         if isinstance(p, dict) and not p.get("image_path")
     ]
     if not products_needing_image:
-        print("[yolo] Aucun produit sans image — modèle non chargé.")
+        print("[yolo] Aucun produit sans image - modèle non chargé.")
         return produits
 
     if not use_yolo():
@@ -1281,7 +1281,7 @@ def ask_gemini(api_key: str, pdf_b64: str) -> dict:
             try:
                 cand = result["candidates"][0]
                 if cand.get("finishReason") and cand["finishReason"] != "STOP":
-                    print(f"  [attention] finishReason={cand['finishReason']} — la réponse peut être incomplète.")
+                    print(f"  [attention] finishReason={cand['finishReason']} - la réponse peut être incomplète.")
                 text = cand["content"]["parts"][0]["text"].strip()
                 if text.startswith("```"):
                     text = text.split("\n", 1)[-1]
@@ -1341,7 +1341,7 @@ def extract_catalogue(pdf_path: str, api_key: str, output_dir: str):
         page_map = render_pages(pdf_path, output_dir, pages_with_products)
         produits = assign_yolo(produits, page_map, output_dir)
     else:
-        print(f"[images] Toutes les images extraites via fitz ({len(produits)} produits) — YOLO non nécessaire.")
+        print(f"[images] Toutes les images extraites via fitz ({len(produits)} produits) - YOLO non nécessaire.")
     all_results_by_page = split_page(produits)
     total_pages_hint = max_page(all_results_by_page)
 
@@ -1362,7 +1362,7 @@ def extract_catalogue(pdf_path: str, api_key: str, output_dir: str):
 
     print(f"\n{'─'*50}")
     print(f"  PDF         : {pdf_path.name}")
-    print(f"  Pages       : {total_pages_hint if total_pages_hint is not None else '— (voir champ page par produit)'}")
+    print(f"  Pages       : {total_pages_hint if total_pages_hint is not None else '- (voir champ page par produit)'}")
     print(f"  Produits    : {len(produits)}")
     print(f"  Résultats   : {output_dir}/")
     print(f"{'─'*50}")

@@ -15,10 +15,15 @@ from extract import extract_catalogue
 
 load_dotenv(override=True)
 
-app = Flask(__name__)
+FRONTEND_FOLDER = Path("frontend")
+app = Flask(
+    __name__,
+    template_folder=str(FRONTEND_FOLDER),
+    static_folder=str(FRONTEND_FOLDER),
+    static_url_path="/static",
+)
 UPLOAD_FOLDER = Path("uploads")
 RESULTS_FOLDER = Path("resultats")
-STATIC_FOLDER = Path("static")
 UPLOAD_FOLDER.mkdir(exist_ok=True)
 RESULTS_FOLDER.mkdir(exist_ok=True)
 
@@ -233,7 +238,7 @@ def job_timeout(job_id: str) -> None:
 
 
 def pdf_default() -> Path | None:
-    pdfs = sorted(STATIC_FOLDER.glob("*.pdf"))
+    pdfs = sorted(FRONTEND_FOLDER.glob("*.pdf"))
     return pdfs[0] if pdfs else None
 
 
@@ -316,7 +321,7 @@ def upload():
 def use_default_pdf():
     pdf = pdf_default()
     if not pdf:
-        return jsonify({"error": "Aucun PDF par defaut trouve dans /static"}), 404
+        return jsonify({"error": "Aucun PDF par defaut trouve dans /frontend"}), 404
 
     job_id, error = start_job(pdf)
     if error:

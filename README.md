@@ -74,7 +74,6 @@ Ensuite ouvre ton navigateur sur :
 
 - `app.py` : serveur Flask et routes API
 - `extract.py` : logique d'extraction
-- `templates/` : pages HTML
-- `static/` : fichiers CSS/JS
+- `frontend/` : interface (HTML, CSS, PDF par defaut)
 - `uploads/` : PDF envoyes (runtime)
 - `resultats/` : resultats d'extraction (runtime)
