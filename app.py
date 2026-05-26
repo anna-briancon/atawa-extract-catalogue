@@ -1,8 +1,15 @@
-from flask import Flask, render_template, request, jsonify, send_file, send_from_directory
-import os, uuid, time, concurrent.futures, threading
+import concurrent.futures
+import os
+import threading
+import time
+import uuid
 from pathlib import Path
-from extract import extract_catalogue
+
 from dotenv import load_dotenv
+from flask import Flask, jsonify, render_template, request, send_file, send_from_directory
+
+from extract import extract_catalogue
+
 load_dotenv(override=True)
 
 app = Flask(__name__)
@@ -12,12 +19,13 @@ STATIC_FOLDER = Path("static")
 UPLOAD_FOLDER.mkdir(exist_ok=True)
 RESULTS_FOLDER.mkdir(exist_ok=True)
 
-jobs = {}  # stocke l'état des extractions en cours
+jobs: dict[str, dict] = {}
 JOB_TIMEOUT_SECONDS = int(os.getenv("EXTRACTION_JOB_TIMEOUT_SECONDS", "600"))
 JOB_EXECUTOR_MAX_WORKERS = int(os.getenv("JOB_EXECUTOR_MAX_WORKERS", "2"))
-job_executor = concurrent.futures.ThreadPoolExecutor(max_workers=max(1, JOB_EXECUTOR_MAX_WORKERS))
+job_executor = concurrent.futures.ThreadPoolExecutor(
+    max_workers=max(1, JOB_EXECUTOR_MAX_WORKERS)
+)
 
-# Avertissement si la config rend les retries Gemini inopérantes.
 try:
     _gemini_http_timeout = int(os.getenv("GEMINI_HTTP_TIMEOUT_SECONDS", "240"))
 except ValueError:
@@ -31,31 +39,30 @@ if JOB_TIMEOUT_SECONDS <= _gemini_http_timeout:
     )
 
 
-def _run_extraction_job(job_id: str, pdf_path: Path, output_dir: Path, api_key: str):
+def run_job(job_id: str, pdf_path: Path, output_dir: Path, api_key: str) -> None:
     try:
         produits = extract_catalogue(str(pdf_path), api_key, str(output_dir))
-        # Si le watchdog a déjà expiré le job, on ne l'écrase pas.
         if jobs.get(job_id, {}).get("status") == "en cours":
             jobs[job_id]["status"] = "done"
             jobs[job_id]["produits"] = produits
-    except Exception as e:
+    except Exception as exc:
         if jobs.get(job_id):
             jobs[job_id]["status"] = "error"
-            jobs[job_id]["error"] = str(e)
+            jobs[job_id]["error"] = str(exc)
 
 
-def _watchdog_job_timeout(job_id: str):
+def job_timeout(job_id: str) -> None:
     time.sleep(JOB_TIMEOUT_SECONDS)
     job = jobs.get(job_id)
-    if not job:
-        return
-    if job.get("status") != "en cours":
+    if not job or job.get("status") != "en cours":
         return
 
     started_at = job.get("started_at")
-    elapsed = int(max(0, time.time() - started_at)) if isinstance(started_at, (int, float)) else JOB_TIMEOUT_SECONDS
+    if isinstance(started_at, (int, float)):
+        elapsed = int(max(0, time.time() - started_at))
+    else:
+        elapsed = JOB_TIMEOUT_SECONDS
 
-    # On essaie d'annuler le Future en cours pour libérer le thread.
     future = job.get("_future")
     if future is not None:
         try:
@@ -72,20 +79,25 @@ def _watchdog_job_timeout(job_id: str):
     )
 
 
-def get_default_pdf_path():
-    for pdf_path in sorted(STATIC_FOLDER.glob("*.pdf")):
-        return pdf_path
+def pdf_default() -> Path | None:
+    pdfs = sorted(STATIC_FOLDER.glob("*.pdf"))
+    return pdfs[0] if pdfs else None
+
+
+def elapsed(job: dict) -> int | None:
+    started_at = job.get("started_at")
+    if isinstance(started_at, (int, float)):
+        return int(max(0, time.time() - started_at))
     return None
 
 
-def start_extraction(pdf_path: Path):
-    job_id = str(uuid.uuid4())
-    output_dir = RESULTS_FOLDER / job_id
+def start_job(pdf_path: Path) -> tuple[str | None, dict | None]:
     api_key = os.getenv("GEMINI_API_KEY")
-
     if not api_key:
         return None, {"error": "GEMINI_API_KEY manquante dans .env"}
 
+    job_id = str(uuid.uuid4())
+    output_dir = RESULTS_FOLDER / job_id
     jobs[job_id] = {
         "status": "en cours",
         "produits": [],
@@ -96,18 +108,18 @@ def start_extraction(pdf_path: Path):
         "timeout_seconds": JOB_TIMEOUT_SECONDS,
     }
 
-    future = job_executor.submit(_run_extraction_job, job_id, pdf_path, output_dir, api_key)
+    future = job_executor.submit(run_job, job_id, pdf_path, output_dir, api_key)
     jobs[job_id]["_future"] = future
-    watchdog_thread = threading.Thread(target=_watchdog_job_timeout, args=(job_id,), daemon=True)
-    watchdog_thread.start()
+    threading.Thread(target=job_timeout, args=(job_id,), daemon=True).start()
     return job_id, None
+
 
 @app.route("/")
 def index():
-    default_pdf = get_default_pdf_path()
+    pdf = pdf_default()
     return render_template(
         "index.html",
-        default_pdf_name=default_pdf.name if default_pdf else None,
+        default_pdf_name=pdf.name if pdf else None,
     )
 
 
@@ -115,17 +127,17 @@ def index():
 def health():
     return jsonify({"status": "ok"}), 200
 
+
 @app.route("/upload", methods=["POST"])
 def upload():
-    f = request.files.get("pdf")
-    if not f:
+    uploaded = request.files.get("pdf")
+    if not uploaded:
         return jsonify({"error": "Pas de fichier"}), 400
 
-    uploaded_id = str(uuid.uuid4())
-    pdf_path = UPLOAD_FOLDER / f"{uploaded_id}.pdf"
-    f.save(pdf_path)
+    pdf_path = UPLOAD_FOLDER / f"{uuid.uuid4()}.pdf"
+    uploaded.save(pdf_path)
 
-    job_id, error = start_extraction(pdf_path)
+    job_id, error = start_job(pdf_path)
     if error:
         return jsonify(error), 400
 
@@ -134,34 +146,31 @@ def upload():
 
 @app.route("/use-default-pdf", methods=["POST"])
 def use_default_pdf():
-    default_pdf = get_default_pdf_path()
-    if not default_pdf:
+    pdf = pdf_default()
+    if not pdf:
         return jsonify({"error": "Aucun PDF par defaut trouve dans /static"}), 404
 
-    job_id, error = start_extraction(default_pdf)
+    job_id, error = start_job(pdf)
     if error:
         return jsonify(error), 400
 
-    return jsonify({"job_id": job_id, "pdf_name": default_pdf.name})
+    return jsonify({"job_id": job_id, "pdf_name": pdf.name})
+
 
 @app.route("/status/<job_id>")
 def status(job_id):
     job = jobs.get(job_id)
     if not job:
         return jsonify({"status": "inconnu"})
-    started_at = job.get("started_at")
-    if isinstance(started_at, (int, float)):
-        elapsed_seconds = int(max(0, time.time() - started_at))
-    else:
-        elapsed_seconds = None
     return jsonify({
         "status": job.get("status", "inconnu"),
         "error": job.get("error"),
         "pdf_name": job.get("pdf_name"),
-        "elapsed_seconds": elapsed_seconds,
+        "elapsed_seconds": elapsed(job),
         "timeout_seconds": job.get("timeout_seconds"),
-        "produits_count": len(job.get("produits", []) or []),
+        "produits_count": len(job.get("produits") or []),
     })
+
 
 @app.route("/results/<job_id>")
 def results(job_id):
@@ -175,6 +184,7 @@ def results(job_id):
         "pdf_name": job.get("pdf_name"),
     })
 
+
 @app.route("/images/<path:filename>")
 def serve_image(filename):
     return send_from_directory(RESULTS_FOLDER, filename)
@@ -187,5 +197,7 @@ def serve_pdf(job_id):
         return jsonify({"error": "Job inconnu"}), 404
     return send_file(job["pdf_path"], mimetype="application/pdf")
 
+
 if __name__ == "__main__":
-    app.run(debug=True)
+    debug = os.getenv("FLASK_DEBUG", "true").strip().lower() in {"1", "true", "yes", "on"}
+    app.run(debug=debug)

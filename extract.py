@@ -9,20 +9,22 @@ import random
 import time
 import gc
 from pathlib import Path
+import fitz  # PyMuPDF
+import cv2
+import numpy as np
+from ultralytics import YOLO
 
-def _python_inside_venv(venv_root: Path) -> Path:
+def venv_py(venv_root: Path) -> Path:
     if sys.platform == "win32":
         return venv_root / "Scripts" / "python.exe"
     return venv_root / "bin" / "python"
 
 
-def _venv_python_path() -> Path | None:
+def find_venv() -> Path | None:
     """
     Premier interpréteur de venv utilisable, dans l'ordre :
     - EXTRACT_CATALOGUE_VENV : racine du venv, ou chemin direct vers python(.exe)
-    - extraction_pdf_ia/.venv
-    - extraction_pdf_ia/venv
-    - flux_UPF/venv (partagé)
+    - .venv puis venv à la racine du projet
     """
     here = Path(__file__).resolve().parent
     roots: list[Path] = []
@@ -32,15 +34,9 @@ def _venv_python_path() -> Path | None:
         if p.is_file() and p.name.lower().startswith("python"):
             return p
         roots.append(p)
-    roots.extend(
-        [
-            here / ".venv",
-            here / "venv",
-            here.parent / "flux_UPF" / "venv",
-        ]
-    )
+    roots.extend([here / ".venv", here / "venv"])
     for root in roots:
-        cand = _python_inside_venv(root)
+        cand = venv_py(root)
         if cand.is_file():
             return cand
     return None
@@ -48,24 +44,18 @@ def _venv_python_path() -> Path | None:
 
 def ensure_venv():
     """Relance ce script avec le venv si on ne l'utilise pas déjà."""
-    venv_py = _venv_python_path()
-    if venv_py is None:
+    venv_python = find_venv()
+    if venv_python is None:
         return
     try:
-        if Path(sys.executable).resolve() == venv_py.resolve():
+        if Path(sys.executable).resolve() == venv_python.resolve():
             return
     except OSError:
         return
-    os.execv(str(venv_py), [str(venv_py)] + sys.argv)
+    os.execv(str(venv_python), [str(venv_python)] + sys.argv)
 
 
 ensure_venv()
-
-import math
-import fitz  # PyMuPDF
-import cv2
-import numpy as np
-from ultralytics import YOLO
 
 # region PROMPT
 PRODUCT_SCHEMA = {
@@ -540,31 +530,149 @@ DEFAULT_FITZ_MIN_IMAGE_BYTES = 15000
 DEFAULT_FITZ_MIN_DECODED_SIDE_PX = 32
 DEFAULT_FITZ_MIN_GRAY_STD = 8.0
 
+# region CONFIG / HELPERS
+
+def env_int(
+    name: str,
+    default: int,
+    *,
+    minimum: int | None = None,
+    maximum: int | None = None,
+) -> int:
+    raw = os.environ.get(name)
+    if raw is None or not str(raw).strip():
+        value = default
+    else:
+        try:
+            value = int(raw)
+        except ValueError:
+            value = default
+    if minimum is not None:
+        value = max(minimum, value)
+    if maximum is not None:
+        value = min(maximum, value)
+    return value
+
+
+def env_float(name: str, default: float, *, minimum: float | None = None) -> float:
+    raw = os.environ.get(name)
+    if raw is None or not str(raw).strip():
+        value = default
+    else:
+        try:
+            value = float(raw)
+        except ValueError:
+            value = default
+    if minimum is not None:
+        value = max(minimum, value)
+    return value
+
+
+def env_on(name: str) -> bool | None:
+    """Retourne None si la variable d'environnement n'est pas définie."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return None
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def render_dpi() -> int:
+    return env_int("EXTRACT_RENDER_DPI", DEFAULT_RENDER_DPI, minimum=100, maximum=300)
+
+
+def fitz_min_bytes() -> int:
+    return env_int("FITZ_MIN_IMAGE_BYTES", DEFAULT_FITZ_MIN_IMAGE_BYTES, minimum=0)
+
+
+def fitz_min_std() -> float:
+    return env_float("FITZ_MIN_GRAY_STD", DEFAULT_FITZ_MIN_GRAY_STD, minimum=0.0)
+
+
+def valid_pages(page_numbers: list) -> list[int]:
+    return sorted({int(p) for p in page_numbers if isinstance(p, int) and p >= 1})
+
+
+def group_page(items: list[tuple[int, dict]]) -> dict[int, list[tuple[int, dict]]]:
+    """Regroupe des produits (index, dict) par numéro de page (_page)."""
+    out: dict[int, list[tuple[int, dict]]] = {}
+    for idx, produit in items:
+        pg = produit.get("_page")
+        if pg is None:
+            continue
+        try:
+            page_num = int(pg)
+        except (TypeError, ValueError):
+            continue
+        out.setdefault(page_num, []).append((idx, produit))
+    return out
+
+
+def rel_path(output_dir: Path, img_path: Path) -> str:
+    try:
+        return str(img_path.relative_to(output_dir)).replace("\\", "/")
+    except ValueError:
+        return str(img_path)
+
+
+def product_pages(produits: list) -> list[int]:
+    return sorted({
+        int(p["_page"])
+        for p in produits
+        if isinstance(p, dict) and p.get("_page") is not None
+    })
+
+
+def max_page(by_page: dict) -> int | None:
+    pages = [
+        int(key.split("_", 1)[1])
+        for key in by_page
+        if key.startswith("page_") and key.split("_", 1)[1].isdigit()
+    ]
+    return max(pages) if pages else None
+
+
+def parse_gemini(result) -> list:
+    if isinstance(result, list):
+        return result
+    if isinstance(result, dict):
+        produits = result.get("produits", [])
+        return produits if isinstance(produits, list) else []
+    return []
+
+
+def retry_wait(attempt: int) -> float:
+    return min(20.0, (2 ** (attempt - 1)) + random.uniform(0.0, 0.7))
+
+
+def get_key() -> str:
+    api_key = (
+        os.environ.get("GEMINI_API_KEY", "").strip()
+        or os.environ.get("GOOGLE_API_KEY", "").strip()
+    )
+    if api_key:
+        return api_key
+    try:
+        api_key = getpass.getpass("\nClé API Gemini : ").strip()
+    except (EOFError, OSError):
+        api_key = ""
+    if not api_key:
+        api_key = input("\nClé API Gemini (saisie visible) : ").strip().strip('"')
+    return api_key
+
+
+def cli_pdf(script_dir: Path) -> Path | None:
+    static_pdfs = sorted(script_dir.glob("static/*.pdf"))
+    if static_pdfs:
+        return static_pdfs[0]
+    legacy = script_dir / "catalogue_SU.pdf"
+    return legacy if legacy.exists() else None
+
+
+# endregion
+
 # region YOLO / IMAGES
 
-def _get_render_dpi() -> int:
-    try:
-        dpi = int(os.environ.get("EXTRACT_RENDER_DPI", str(DEFAULT_RENDER_DPI)))
-    except ValueError:
-        dpi = DEFAULT_RENDER_DPI
-    return max(100, min(dpi, 300))
-
-
-def _get_fitz_min_image_bytes() -> int:
-    try:
-        return max(0, int(os.environ.get("FITZ_MIN_IMAGE_BYTES", str(DEFAULT_FITZ_MIN_IMAGE_BYTES))))
-    except ValueError:
-        return DEFAULT_FITZ_MIN_IMAGE_BYTES
-
-
-def _get_fitz_min_gray_std() -> float:
-    try:
-        return max(0.0, float(os.environ.get("FITZ_MIN_GRAY_STD", str(DEFAULT_FITZ_MIN_GRAY_STD))))
-    except ValueError:
-        return DEFAULT_FITZ_MIN_GRAY_STD
-
-
-def _is_usable_embedded_image(image_bytes: bytes) -> bool:
+def ok_image(image_bytes: bytes) -> bool:
     """
     Rejette masques 1x1, placeholders noirs et mini-pictos embarqués dans le PDF.
     (Les filtres géométriques sur la page ne suffisent pas : le rectangle affiché
@@ -572,14 +680,11 @@ def _is_usable_embedded_image(image_bytes: bytes) -> bool:
     """
     if not image_bytes:
         return False
-    min_bytes = _get_fitz_min_image_bytes()
+    min_bytes = fitz_min_bytes()
     if min_bytes > 0 and len(image_bytes) < min_bytes:
         return False
 
-    try:
-        min_side = max(1, int(os.environ.get("FITZ_MIN_DECODED_SIDE_PX", str(DEFAULT_FITZ_MIN_DECODED_SIDE_PX))))
-    except ValueError:
-        min_side = DEFAULT_FITZ_MIN_DECODED_SIDE_PX
+    min_side = env_int("FITZ_MIN_DECODED_SIDE_PX", DEFAULT_FITZ_MIN_DECODED_SIDE_PX, minimum=1)
 
     arr = np.frombuffer(image_bytes, dtype=np.uint8)
     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
@@ -590,40 +695,37 @@ def _is_usable_embedded_image(image_bytes: bytes) -> bool:
         return False
 
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    if float(gray.std()) < _get_fitz_min_gray_std():
+    if float(gray.std()) < fitz_min_std():
         return False
     return True
 
 
-def _is_local_runtime() -> bool:
+def is_local() -> bool:
     flask_env = os.environ.get("FLASK_ENV", "").strip().lower()
     app_env = os.environ.get("APP_ENV", "").strip().lower()
-    render_service = os.environ.get("RENDER", "").strip()
-    if render_service:
-        return False
     if flask_env == "development" or app_env == "local":
         return True
     return os.environ.get("PYTHON_ENV", "").strip().lower() in {"development", "local"}
 
 
-def _should_enable_yolo() -> bool:
+def use_yolo() -> bool:
     """
     Active YOLO par défaut en local, désactivé hors local.
     Possibilité de forcer via ENABLE_YOLO=true/false.
     """
-    explicit = os.environ.get("ENABLE_YOLO")
+    explicit = env_on("ENABLE_YOLO")
     if explicit is not None:
-        return explicit.strip().lower() in {"1", "true", "yes", "on"}
-    return _is_local_runtime()
+        return explicit
+    return is_local()
 
 
-def render_selected_pdf_pages(pdf_path: Path, output_dir: Path, page_numbers: list[int], dpi: int | None = None) -> dict[int, Path]:
+def render_pages(pdf_path: Path, output_dir: Path, page_numbers: list[int], dpi: int | None = None) -> dict[int, Path]:
     """
     Rend uniquement les pages demandées du PDF en PNG.
     Retourne {page_num: path_png}.
     """
     if dpi is None:
-        dpi = _get_render_dpi()
+        dpi = render_dpi()
     pages_dir = output_dir / "pages_png"
     pages_dir.mkdir(parents=True, exist_ok=True)
 
@@ -631,9 +733,8 @@ def render_selected_pdf_pages(pdf_path: Path, output_dir: Path, page_numbers: li
     zoom = dpi / 72.0
     matrix = fitz.Matrix(zoom, zoom)
 
-    wanted = sorted({int(p) for p in page_numbers if isinstance(p, int) and p >= 1})
     page_map = {}
-    for page_num in wanted:
+    for page_num in valid_pages(page_numbers):
         i = page_num - 1
         if i < 0 or i >= len(doc):
             continue
@@ -649,7 +750,7 @@ def render_selected_pdf_pages(pdf_path: Path, output_dir: Path, page_numbers: li
     return page_map
 
 
-def extract_embedded_images_from_pdf(pdf_path: Path, output_dir: Path, page_numbers: list[int]) -> dict[int, list[dict]]:
+def fitz_images(pdf_path: Path, output_dir: Path, page_numbers: list[int]) -> dict[int, list[dict]]:
     """
     Extrait les images réellement embarquées dans le PDF (rapide, pas de rendu).
     Retourne {page_num: [ {xref, bbox_pt, bbox_px, cy, area, image_path}, ... ]}
@@ -658,25 +759,17 @@ def extract_embedded_images_from_pdf(pdf_path: Path, output_dir: Path, page_numb
     images_dir = output_dir / "images_fitz"
     images_dir.mkdir(parents=True, exist_ok=True)
 
-    dpi = _get_render_dpi()
+    dpi = render_dpi()
     zoom = dpi / 72.0
 
-    # Filtres pour éviter d'attraper logos, pictos promo, fonds, etc.
-    try:
-        min_side_pt = float(os.environ.get("FITZ_MIN_IMAGE_SIDE_PT", "30"))
-    except ValueError:
-        min_side_pt = 30.0
-    try:
-        min_area_ratio = float(os.environ.get("FITZ_MIN_IMAGE_AREA_RATIO", "0.005"))
-    except ValueError:
-        min_area_ratio = 0.005
+    min_side_pt = env_float("FITZ_MIN_IMAGE_SIDE_PT", 30.0, minimum=0.0)
+    min_area_ratio = env_float("FITZ_MIN_IMAGE_AREA_RATIO", 0.005, minimum=0.0)
 
     doc = fitz.open(pdf_path)
     page_images: dict[int, list[dict]] = {}
     xref_cache: dict[int, Path | None] = {}
 
-    wanted = sorted({int(p) for p in page_numbers if isinstance(p, int) and p >= 1})
-    for page_num in wanted:
+    for page_num in valid_pages(page_numbers):
         page_index = page_num - 1
         if page_index < 0 or page_index >= len(doc):
             continue
@@ -717,13 +810,13 @@ def extract_embedded_images_from_pdf(pdf_path: Path, output_dir: Path, page_numb
                         continue
                     image_bytes = base_image.get("image") if isinstance(base_image, dict) else None
                     ext = base_image.get("ext", "png") if isinstance(base_image, dict) else "png"
-                    if not image_bytes or not _is_usable_embedded_image(image_bytes):
+                    if not image_bytes or not ok_image(image_bytes):
                         xref_cache[xref] = None
                         continue
                     out_path = images_dir / f"x{xref}.{ext}"
                     if out_path.exists():
                         try:
-                            if not _is_usable_embedded_image(out_path.read_bytes()):
+                            if not ok_image(out_path.read_bytes()):
                                 out_path.unlink(missing_ok=True)
                         except OSError:
                             pass
@@ -759,7 +852,7 @@ def extract_embedded_images_from_pdf(pdf_path: Path, output_dir: Path, page_numb
     return page_images
 
 
-def assign_fitz_images_to_products(produits: list, page_fitz_images: dict[int, list[dict]], output_dir: Path) -> list:
+def assign_fitz(produits: list, page_fitz_images: dict[int, list[dict]], output_dir: Path) -> list:
     """
     Assigne les images embarquées (fitz) aux produits, page par page,
     en suivant l'ordre haut->bas.
@@ -769,20 +862,12 @@ def assign_fitz_images_to_products(produits: list, page_fitz_images: dict[int, l
     if not produits:
         return produits
 
-    produits_par_page: dict[int, list[tuple[int, dict]]] = {}
-    for idx, p in enumerate(produits):
-        if not isinstance(p, dict):
-            continue
-        pg = p.get("_page")
-        if pg is None:
-            continue
-        try:
-            pg = int(pg)
-        except Exception:
-            continue
-        produits_par_page.setdefault(pg, []).append((idx, p))
-
-    for page_num, items in produits_par_page.items():
+    indexed = [
+        (idx, p)
+        for idx, p in enumerate(produits)
+        if isinstance(p, dict) and p.get("_page") is not None
+    ]
+    for page_num, items in group_page(indexed).items():
         available = page_fitz_images.get(page_num, [])
         if len(available) < len(items):
             if available:
@@ -799,7 +884,7 @@ def assign_fitz_images_to_products(produits: list, page_fitz_images: dict[int, l
         for det in selected:
             img_path = Path(det["image_path"])
             try:
-                if not _is_usable_embedded_image(img_path.read_bytes()):
+                if not ok_image(img_path.read_bytes()):
                     print(
                         f"[fitz] page {page_num}: image rejetée ({img_path.name}) "
                         f"→ fallback YOLO sur cette page"
@@ -822,22 +907,18 @@ def assign_fitz_images_to_products(produits: list, page_fitz_images: dict[int, l
             img_path = Path(det["image_path"])
             produit["image_bbox_px"] = det["bbox_px"]
             produit["image_source"] = "fitz"
-            try:
-                rel_path = str(img_path.relative_to(output_dir)).replace("\\", "/")
-            except ValueError:
-                rel_path = str(img_path)
-            produit["image_path"] = rel_path
+            produit["image_path"] = rel_path(output_dir, img_path)
 
     return produits
 
 
-def load_yolo_model():
+def load_yolo():
     model_name = os.environ.get("YOLO_MODEL", DEFAULT_YOLO_MODEL).strip()
     print(f"[yolo] Chargement du modèle : {model_name}")
     return YOLO(model_name)
 
 
-def detect_candidate_bboxes(page_img_path: Path, yolo_model, conf_threshold: float = DEFAULT_YOLO_CONF) -> list[dict]:
+def detect_boxes(page_img_path: Path, yolo_model, conf_threshold: float = DEFAULT_YOLO_CONF) -> list[dict]:
     """
     Détecte des bbox candidates sur une page.
     Retourne une liste triée de dicts :
@@ -901,7 +982,7 @@ def detect_candidate_bboxes(page_img_path: Path, yolo_model, conf_threshold: flo
     return detections
 
 
-def _bbox_iou(box_a, box_b) -> float:
+def iou(box_a, box_b) -> float:
     ax1, ay1, ax2, ay2 = box_a
     bx1, by1, bx2, by2 = box_b
 
@@ -922,13 +1003,13 @@ def _bbox_iou(box_a, box_b) -> float:
     return inter / union if union > 0 else 0.0
 
 
-def dedupe_bboxes(detections: list[dict], iou_threshold: float = 0.7) -> list[dict]:
+def dedupe(detections: list[dict], iou_threshold: float = 0.7) -> list[dict]:
     """
     Supprime les bbox très redondantes.
     """
     kept = []
     for det in sorted(detections, key=lambda d: d["conf"], reverse=True):
-        overlap = any(_bbox_iou(det["bbox"], k["bbox"]) >= iou_threshold for k in kept)
+        overlap = any(iou(det["bbox"], k["bbox"]) >= iou_threshold for k in kept)
         if not overlap:
             kept.append(det)
 
@@ -936,7 +1017,7 @@ def dedupe_bboxes(detections: list[dict], iou_threshold: float = 0.7) -> list[di
     return kept
 
 
-def crop_bbox_from_page(page_img_path: Path, bbox: list[int], out_path: Path, pad: int = 8) -> bool:
+def crop(page_img_path: Path, bbox: list[int], out_path: Path, pad: int = 8) -> bool:
     img = cv2.imread(str(page_img_path))
     if img is None:
         return False
@@ -957,7 +1038,7 @@ def crop_bbox_from_page(page_img_path: Path, bbox: list[int], out_path: Path, pa
     return cv2.imwrite(str(out_path), crop)
 
 
-def assign_yolo_images_to_products(produits: list, page_map: dict[int, Path], output_dir: Path) -> list:
+def assign_yolo(produits: list, page_map: dict[int, Path], output_dir: Path) -> list:
     """
     V1 simple :
     - détecte des bbox candidates sur chaque page
@@ -976,32 +1057,21 @@ def assign_yolo_images_to_products(produits: list, page_map: dict[int, Path], ou
         print("[yolo] Aucun produit sans image — modèle non chargé.")
         return produits
 
-    if not _should_enable_yolo():
+    if not use_yolo():
         print("[yolo] Désactivé (runtime non local ou ENABLE_YOLO=false).")
         return produits
 
-    yolo_model = load_yolo_model()
+    yolo_model = load_yolo()
     images_dir = output_dir / "images_yolo"
 
-    produits_par_page = {}
-    for idx, p in products_needing_image:
-        pg = p.get("_page")
-        if pg is None:
-            continue
-        try:
-            pg = int(pg)
-        except Exception:
-            continue
-        produits_par_page.setdefault(pg, []).append((idx, p))
-
-    for page_num, items in produits_par_page.items():
+    for page_num, items in group_page(products_needing_image).items():
         page_img_path = page_map.get(page_num)
         if page_img_path is None:
             continue
 
         print(f"[yolo] Détection page {page_num}...")
-        detections = detect_candidate_bboxes(page_img_path, yolo_model)
-        detections = dedupe_bboxes(detections)
+        detections = detect_boxes(page_img_path, yolo_model)
+        detections = dedupe(detections)
 
         # on garde les bbox assez grandes pour être plausibles comme photo produit
         plausible = []
@@ -1043,10 +1113,10 @@ def assign_yolo_images_to_products(produits: list, page_map: dict[int, Path], ou
 
             slug = f"page_{page_num:03d}_{prod_idx+1:04d}"
             crop_path = images_dir / f"{slug}.png"
-            ok = crop_bbox_from_page(page_img_path, bbox, crop_path)
+            ok = crop(page_img_path, bbox, crop_path)
 
             if ok:
-                produit["image_path"] = str(crop_path.relative_to(output_dir)).replace("\\", "/")
+                produit["image_path"] = rel_path(output_dir, crop_path)
 
     del yolo_model
     gc.collect()
@@ -1054,12 +1124,12 @@ def assign_yolo_images_to_products(produits: list, page_map: dict[int, Path], ou
 
 # endregion
 
-# Convertit le PDF en base64
-def pdf_to_base64(pdf_path: Path) -> str:
+
+def to_b64(pdf_path: Path) -> str:
     return base64.b64encode(pdf_path.read_bytes()).decode("utf-8")
 
-# Normalise les produits pour la compatibilité avec les exports existants
-def _normalize_products(produits: list) -> list:
+
+def normalize(produits: list) -> list:
     """Copie page → _page pour compatibilité avec les exports existants."""
     for p in produits:
         if not isinstance(p, dict):
@@ -1069,8 +1139,8 @@ def _normalize_products(produits: list) -> list:
             p["_page"] = pg
     return produits
 
-# Groupe les produits par page
-def _group_by_page(produits: list) -> dict:
+
+def split_page(produits: list) -> dict:
     out = {}
     for p in produits:
         if not isinstance(p, dict):
@@ -1082,8 +1152,8 @@ def _group_by_page(produits: list) -> dict:
         out.setdefault(key, []).append(p)
     return dict(sorted(out.items(), key=lambda x: int(x[0].split("_", 1)[1]) if x[0].split("_", 1)[1].isdigit() else 0))
 
-# Appel API Gemini
-def _format_gemini_http_error(http_code: int, error_body: str) -> str:
+
+def gemini_err(http_code: int, error_body: str) -> str:
     try:
         parsed = json.loads(error_body)
     except json.JSONDecodeError:
@@ -1112,31 +1182,25 @@ def _format_gemini_http_error(http_code: int, error_body: str) -> str:
     return f"Erreur Gemini HTTP {http_code}{status_part}: {message}.{hint_part}".strip()
 
 
-def call_gemini_pdf(api_key: str, pdf_b64: str) -> dict:
+def ask_gemini(api_key: str, pdf_b64: str) -> dict:
     primary_model = os.environ.get("GEMINI_MODEL", DEFAULT_GEMINI_MODEL).strip()
     fallback_model = os.environ.get("GEMINI_FALLBACK_MODEL", "").strip()
     models_to_try = [primary_model]
     if fallback_model and fallback_model != primary_model:
         models_to_try.append(fallback_model)
 
-    try:
-        max_tokens = int(os.environ.get("EXTRACT_MAX_OUTPUT_TOKENS", str(DEFAULT_MAX_OUTPUT_TOKENS)))
-    except ValueError:
-        max_tokens = DEFAULT_MAX_OUTPUT_TOKENS
-    max_tokens = max(1024, min(max_tokens, 65536))
-    try:
-        http_timeout = int(os.environ.get("GEMINI_HTTP_TIMEOUT_SECONDS", str(DEFAULT_GEMINI_HTTP_TIMEOUT_SECONDS)))
-    except ValueError:
-        http_timeout = DEFAULT_GEMINI_HTTP_TIMEOUT_SECONDS
-    http_timeout = max(30, min(http_timeout, 300))
-
-    try:
-        max_attempts = int(
-            os.environ.get("GEMINI_RETRY_MAX_ATTEMPTS", str(DEFAULT_GEMINI_RETRY_MAX_ATTEMPTS))
-        )
-    except ValueError:
-        max_attempts = DEFAULT_GEMINI_RETRY_MAX_ATTEMPTS
-    max_attempts = max(1, min(max_attempts, 8))
+    max_tokens = env_int(
+        "EXTRACT_MAX_OUTPUT_TOKENS", DEFAULT_MAX_OUTPUT_TOKENS, minimum=1024, maximum=65536
+    )
+    http_timeout = env_int(
+        "GEMINI_HTTP_TIMEOUT_SECONDS",
+        DEFAULT_GEMINI_HTTP_TIMEOUT_SECONDS,
+        minimum=30,
+        maximum=300,
+    )
+    max_attempts = env_int(
+        "GEMINI_RETRY_MAX_ATTEMPTS", DEFAULT_GEMINI_RETRY_MAX_ATTEMPTS, minimum=1, maximum=8
+    )
 
     retryable_http_codes = {429, 500, 502, 503, 504}
     last_error_message = ""
@@ -1178,12 +1242,11 @@ def call_gemini_pdf(api_key: str, pdf_b64: str) -> dict:
             except urllib.error.HTTPError as e:
                 error_body = e.read().decode("utf-8")
                 print(f"  [erreur HTTP {e.code}] {error_body}")
-                formatted = _format_gemini_http_error(e.code, error_body)
+                formatted = gemini_err(e.code, error_body)
                 last_error_message = formatted
 
                 if e.code in retryable_http_codes and attempt < max_attempts:
-                    # Backoff exponentiel + jitter pour lisser les pics de charge Gemini.
-                    sleep_seconds = min(20.0, (2 ** (attempt - 1)) + random.uniform(0.0, 0.7))
+                    sleep_seconds = retry_wait(attempt)
                     print(
                         f"  [retry] modèle={model} tentative {attempt}/{max_attempts} "
                         f"après erreur HTTP {e.code}, pause {sleep_seconds:.1f}s"
@@ -1195,7 +1258,7 @@ def call_gemini_pdf(api_key: str, pdf_b64: str) -> dict:
             except urllib.error.URLError as e:
                 last_error_message = f"Erreur réseau Gemini: {e}"
                 if attempt < max_attempts:
-                    sleep_seconds = min(20.0, (2 ** (attempt - 1)) + random.uniform(0.0, 0.7))
+                    sleep_seconds = retry_wait(attempt)
                     print(
                         f"  [retry] modèle={model} tentative {attempt}/{max_attempts} "
                         f"après erreur réseau, pause {sleep_seconds:.1f}s"
@@ -1206,7 +1269,7 @@ def call_gemini_pdf(api_key: str, pdf_b64: str) -> dict:
             except TimeoutError:
                 last_error_message = f"Timeout Gemini après {http_timeout}s."
                 if attempt < max_attempts:
-                    sleep_seconds = min(20.0, (2 ** (attempt - 1)) + random.uniform(0.0, 0.7))
+                    sleep_seconds = retry_wait(attempt)
                     print(
                         f"  [retry] modèle={model} tentative {attempt}/{max_attempts} "
                         f"après timeout, pause {sleep_seconds:.1f}s"
@@ -1243,44 +1306,29 @@ def call_gemini_pdf(api_key: str, pdf_b64: str) -> dict:
         "produits": []
     }
 
-# Fonction principale qui extrait les produits du catalogue
 def extract_catalogue(pdf_path: str, api_key: str, output_dir: str):
     pdf_path = Path(pdf_path)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"\n[1/2] Lecture du PDF et encodage...")
-    pdf_b64 = pdf_to_base64(pdf_path)
+    pdf_b64 = to_b64(pdf_path)
     size_mb = len(pdf_b64) * 3 / 4 / (1024 * 1024)
     print(f"    → {pdf_path.name} (~{size_mb:.2f} Mo données base64)")
 
     model_used = os.environ.get("GEMINI_MODEL", DEFAULT_GEMINI_MODEL).strip()
-    try:
-        max_tok = int(os.environ.get("EXTRACT_MAX_OUTPUT_TOKENS", str(DEFAULT_MAX_OUTPUT_TOKENS)))
-    except ValueError:
-        max_tok = DEFAULT_MAX_OUTPUT_TOKENS
+    max_tok = env_int("EXTRACT_MAX_OUTPUT_TOKENS", DEFAULT_MAX_OUTPUT_TOKENS)
     print(f"\n[2/2] Extraction via Gemini (modèle : {model_used}, maxOutputTokens : {max_tok})...")
-    result = call_gemini_pdf(api_key, pdf_b64)
+    result = ask_gemini(api_key, pdf_b64)
     if isinstance(result, dict) and result.get("error"):
         raise RuntimeError(result["error"])
 
-    if isinstance(result, list):
-        produits = result
-    elif isinstance(result, dict):
-        produits = result.get("produits", [])
-    else:
-        produits = []
-    if not isinstance(produits, list):
-        produits = []
-    _normalize_products(produits)
-    pages_with_products = sorted({
-        int(p.get("_page"))
-        for p in produits
-        if isinstance(p, dict) and p.get("_page") is not None
-    })
+    produits = parse_gemini(result)
+    normalize(produits)
+    pages_with_products = product_pages(produits)
     print(f"\n[images] Extraction des images embarquées via fitz ({len(pages_with_products)} pages)...")
-    page_fitz_images = extract_embedded_images_from_pdf(pdf_path, output_dir, pages_with_products)
-    produits = assign_fitz_images_to_products(produits, page_fitz_images, output_dir)
+    page_fitz_images = fitz_images(pdf_path, output_dir, pages_with_products)
+    produits = assign_fitz(produits, page_fitz_images, output_dir)
 
     missing_after_fitz = [
         p for p in produits if isinstance(p, dict) and not p.get("image_path")
@@ -1290,16 +1338,12 @@ def extract_catalogue(pdf_path: str, api_key: str, output_dir: str):
             f"[images] {len(missing_after_fitz)}/{len(produits)} produit(s) sans image embarquée "
             f"→ rendu des pages + fallback YOLO..."
         )
-        page_map = render_selected_pdf_pages(pdf_path, output_dir, pages_with_products)
-        produits = assign_yolo_images_to_products(produits, page_map, output_dir)
+        page_map = render_pages(pdf_path, output_dir, pages_with_products)
+        produits = assign_yolo(produits, page_map, output_dir)
     else:
         print(f"[images] Toutes les images extraites via fitz ({len(produits)} produits) — YOLO non nécessaire.")
-    all_results_by_page = _group_by_page(produits)
-
-    pages_with_products = [
-        int(k.split("_", 1)[1]) for k in all_results_by_page if k.startswith("page_") and k.split("_", 1)[1].isdigit()
-    ]
-    total_pages_hint = max(pages_with_products) if pages_with_products else None
+    all_results_by_page = split_page(produits)
+    total_pages_hint = max_page(all_results_by_page)
 
     print(f"\n[export] Écriture des JSON...")
     output_json = output_dir / "produits.json"
@@ -1325,37 +1369,30 @@ def extract_catalogue(pdf_path: str, api_key: str, output_dir: str):
 
     return produits
 
-if __name__ == "__main__":
+def main() -> None:
     script_dir = Path(__file__).resolve().parent
-    default_pdf = script_dir / "catalogue_SU.pdf"
     if len(sys.argv) > 1:
-        pdf_path = sys.argv[1]
-    elif default_pdf.exists():
-        pdf_path = str(default_pdf)
-        print(f"\nPDF par défaut : {pdf_path}")
+        pdf_path = Path(sys.argv[1])
     else:
-        pdf_path = input("\nChemin vers le PDF : ").strip().strip('"')
+        default_pdf = cli_pdf(script_dir)
+        if default_pdf is not None:
+            pdf_path = default_pdf
+            print(f"\nPDF par défaut : {pdf_path}")
+        else:
+            pdf_path = Path(input("\nChemin vers le PDF : ").strip().strip('"'))
 
-    if not Path(pdf_path).exists():
+    if not pdf_path.exists():
         print(f"[ERREUR] Fichier introuvable : {pdf_path}")
         sys.exit(1)
 
-    api_key = (
-        os.environ.get("GEMINI_API_KEY", "").strip()
-        or os.environ.get("GOOGLE_API_KEY", "").strip()
-    )
-    if not api_key:
-        try:
-            api_key = getpass.getpass("\nClé API Gemini : ").strip()
-        except (EOFError, OSError):
-            api_key = ""
-    # Sous Windows / terminaux intégrés, getpass renvoie souvent "" même si la saisie semble affichée.
-    if not api_key:
-        api_key = input("\nClé API Gemini (saisie visible) : ").strip().strip('"')
+    api_key = get_key()
     if not api_key:
         print("[ERREUR] Clé API vide. Définissez GEMINI_API_KEY ou saisissez la clé.")
         sys.exit(1)
 
-    output_dir = Path(pdf_path).parent / "resultats_extraction_pdf_7"
+    output_dir = script_dir / "resultats" / "cli"
+    extract_catalogue(pdf_path=str(pdf_path), api_key=api_key, output_dir=str(output_dir))
 
-    extract_catalogue(pdf_path=pdf_path, api_key=api_key, output_dir=str(output_dir))
+
+if __name__ == "__main__":
+    main()
