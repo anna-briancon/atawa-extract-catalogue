@@ -1,365 +1,436 @@
 <!DOCTYPE html>
 <html lang="fr">
-
 <head>
-    <meta charset="UTF-8">
-    <title>Extraction catalogue</title>
-    <link rel="stylesheet" href="/static/style.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Extraction catalogue</title>
+  <link rel="stylesheet" href="/static/style.css">
 </head>
-
 <body>
-    <div class="container">
+
+<div class="container">
+
+  <!-- ═══ TOP PANEL ════════════════════════════════════════════ -->
+  <div id="topPanel" class="top-panel">
+
+    <!-- Header -->
+    <div class="page-header">
+      <div class="header-icon">
+        <svg viewBox="0 0 24 24"><path d="M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v18m0 0h10a2 2 0 0 0 2-2V9M9 21H5a2 2 0 0 1-2-2V9m0 0h18"/></svg>
+      </div>
+      <div class="header-text">
         <h1>Extraction catalogue PDF</h1>
-        <div id="topPanel" class="top-panel">
-            <p class="subtitle">Choisis un PDF (upload ou PDF par défaut) pour extraire automatiquement les produits.</p>
-
-            <div class="default-pdf-card">
-                <p><strong>PDF par défaut :</strong> <span id="defaultPdfName">{{ default_pdf_name or "Aucun PDF disponible dans le dossier" }}</span></p>
-                <button id="useDefaultBtn" class="default-btn" {% if not default_pdf_name %}disabled{% endif %}>Utiliser le PDF par défaut</button>
-            </div>
-
-            <div class="drop-zone" id="dropZone">
-                <p>Glisse ton PDF ici<br><span>ou clique pour choisir un fichier</span></p>
-                <input type="file" id="fileInput" accept=".pdf" hidden>
-            </div>
-
-            <div id="status" class="status hidden"></div>
-            <div id="loader" class="loader hidden"></div>
-            <div id="userFeedback" class="user-feedback hidden"></div>
-        </div>
-
-        <button id="toggleTopPanelBtn" class="toggle-top-panel-btn hidden" aria-label="Afficher ou masquer le panneau d'upload" title="Afficher le panneau d'upload">
-            <span class="toggle-top-panel-icon" aria-hidden="true"></span>
-        </button>
-
-        <div id="results" class="hidden">
-            <div class="results-toolbar">
-                <div class="results-heading">
-                    <h2 class="results-title">Résultats</h2>
-                    <p id="resultsSummary" class="results-summary hidden"></p>
-                </div>
-                <div class="results-actions">
-                    <button id="togglePdfBtn" class="toggle-pdf-btn">Masquer le PDF</button>
-                    <button id="closeResultsBtn" class="close-results-btn" title="Fermer les résultats" aria-label="Fermer les résultats">✕</button>
-                </div>
-            </div>
-
-            <div id="resultsLayout" class="results-layout">
-                <aside id="pdfPanel" class="pdf-panel">
-                    <p class="selected-pdf">Fichier : <strong id="selectedPdfName">—</strong></p>
-                    <div class="pdf-viewer">
-                        <iframe id="pdfViewer" title="Aperçu du PDF"></iframe>
-                    </div>
-                </aside>
-
-                <section class="results-main">
-                    <div class="tabs">
-                        <button class="tab active" onclick="showTab('tableau', this)">Tableau produits</button>
-                        <button class="tab" onclick="showTab('json', this)">JSON brut</button>
-                    </div>
-
-            <div id="tableau" class="tab-content">
-                <table id="produitsTable">
-                    <thead>
-                        <tr>
-                          <th>Image</th>
-                          <th>Produit</th>
-                          <th>Prix</th>
-                          <th>Prix unitaire</th>
-                          <th>Conditionnement</th>
-                          <th>Promo</th>
-                          <th>Rayon</th>
-                          <th>Enseigne</th>
-                          <th>Dates</th>
-                          <th>Page</th>
-                        </tr>
-                      </thead>
-                    <tbody id="tbody"></tbody>
-                </table>
-            </div>
-
-            <div id="json" class="tab-content hidden">
-                <pre id="jsonOutput"></pre>
-            </div>
-                </section>
-            </div>
-        </div>
+        <p class="subtitle">Importe un PDF ou utilise le catalogue par défaut pour extraire les produits automatiquement.</p>
+      </div>
     </div>
 
-    <script>
-        const dropZone = document.getElementById("dropZone");
-        const fileInput = document.getElementById("fileInput");
-        const useDefaultBtn = document.getElementById("useDefaultBtn");
-        const pdfViewer = document.getElementById("pdfViewer");
-        const pdfPanel = document.getElementById("pdfPanel");
-        const topPanel = document.getElementById("topPanel");
-        const toggleTopPanelBtn = document.getElementById("toggleTopPanelBtn");
-        const togglePdfBtn = document.getElementById("togglePdfBtn");
-        const closeResultsBtn = document.getElementById("closeResultsBtn");
-        const resultsSummary = document.getElementById("resultsSummary");
-        const userFeedback = document.getElementById("userFeedback");
-        const resultsLayout = document.getElementById("resultsLayout");
-        let isPdfVisible = true;
-        let isTopPanelCollapsed = false;
-        let activePollInterval = null;
-        let resultsClosedByUser = false;
-        const DEFAULT_CLIENT_POLL_TIMEOUT_MS = 4 * 60 * 1000;
-        const CLIENT_TIMEOUT_SAFETY_BUFFER_MS = 30 * 1000;
+    <!-- Upload grid: default PDF + drop zone -->
+    <div class="upload-grid">
 
-        dropZone.addEventListener("click", () => fileInput.click());
-        dropZone.addEventListener("dragover", e => { e.preventDefault(); dropZone.classList.add("hover"); });
-        dropZone.addEventListener("dragleave", () => dropZone.classList.remove("hover"));
-        dropZone.addEventListener("drop", e => {
-            e.preventDefault();
-            dropZone.classList.remove("hover");
-            handleFile(e.dataTransfer.files[0]);
-        });
-        fileInput.addEventListener("change", () => handleFile(fileInput.files[0]));
-        useDefaultBtn.addEventListener("click", useDefaultPdf);
-        toggleTopPanelBtn.addEventListener("click", toggleTopPanel);
-        togglePdfBtn.addEventListener("click", togglePdfPanel);
-        closeResultsBtn.addEventListener("click", closeResults);
+      <!-- Left: PDF par défaut -->
+      <div class="upload-section">
+        <span class="section-eyebrow">PDF par défaut</span>
+        <div class="default-pdf-card">
+          <div class="pdf-file-icon">
+            <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+          </div>
+          <div class="pdf-info">
+            <div class="pdf-label">Fichier disponible</div>
+            <div class="pdf-name" id="defaultPdfName">{{ default_pdf_name or "Aucun PDF disponible" }}</div>
+          </div>
+          <button id="useDefaultBtn" class="default-btn" {% if not default_pdf_name %}disabled{% endif %}>
+            <svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            Lancer
+          </button>
+        </div>
+      </div>
 
-        async function fetchJson(url, options) {
-            const response = await fetch(url, options);
-            const raw = await response.text();
-            let data = {};
-            try {
-                data = raw ? JSON.parse(raw) : {};
-            } catch (_) {
-                throw new Error(`Réponse invalide (${response.status})`);
-            }
-            if (!response.ok) {
-                throw new Error(data.error || `Erreur HTTP ${response.status}`);
-            }
-            return data;
-        }
+      <div class="upload-divider"></div>
 
-        function handleFile(file) {
-            if (!file || !file.name.endsWith(".pdf")) {
-                setStatus("⚠️ Merci de déposer un fichier PDF.", "error");
-                return;
-            }
-            clearUserFeedback();
-            resultsClosedByUser = false;
-            resetResults();
-            const formData = new FormData();
-            formData.append("pdf", file);
-            setStatus("Envoi du fichier...", "info");
-            showLoader(true);
+      <!-- Right: Drop zone -->
+      <div class="upload-section">
+        <span class="section-eyebrow">Importer un PDF</span>
+        <div class="drop-zone" id="dropZone">
+          <div class="drop-zone-icon">
+            <svg viewBox="0 0 24 24"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg>
+          </div>
+          <p class="dz-main">Glisse ton PDF ici</p>
+          <p class="dz-sub">ou clique pour choisir un fichier · .pdf uniquement</p>
+          <input type="file" id="fileInput" accept=".pdf" hidden>
+        </div>
+      </div>
+    </div>
 
-            fetchJson("/upload", { method: "POST", body: formData })
-                .then(data => {
-                    if (data.error) {
-                        setStatus("❌ Erreur : " + data.error, "error");
-                        showLoader(false);
-                        return;
-                    }
-                    pollStatus(data.job_id, data.pdf_name);
-                })
-                .catch((err) => {
-                    setStatus("❌ " + err.message, "error");
-                    showLoader(false);
-                });
-        }
+    <!-- Status / loader / feedback -->
+    <div id="status" class="status hidden"></div>
+    <div id="loader" class="loader hidden"></div>
+    <div id="userFeedback" class="user-feedback hidden"></div>
 
-        function useDefaultPdf() {
-            clearUserFeedback();
-            resultsClosedByUser = false;
-            resetResults();
-            setStatus("Lancement de l'extraction depuis le PDF par défaut...", "info");
-            showLoader(true);
+  </div><!-- /top-panel -->
 
-            fetchJson("/use-default-pdf", { method: "POST" })
-                .then(data => {
-                    if (data.error) {
-                        setStatus("❌ Erreur : " + data.error, "error");
-                        showLoader(false);
-                        return;
-                    }
-                    pollStatus(data.job_id, data.pdf_name);
-                })
-                .catch((err) => {
-                    setStatus("❌ " + err.message, "error");
-                    showLoader(false);
-                });
-        }
+  <!-- Toggle button (shown when results are open) -->
+  <button id="toggleTopPanelBtn" class="toggle-top-panel-btn hidden" aria-label="Afficher ou masquer le panneau d'import">
+    <span class="toggle-top-panel-icon" aria-hidden="true"></span>
+    <span id="toggleTopPanelLabel">Options d'import</span>
+  </button>
 
-        function pollStatus(jobId, pdfName) {
-            setStatus("Extraction en cours, ça peut prendre une minute...", "info");
-            if (activePollInterval) clearInterval(activePollInterval);
-            const pollStartedAt = Date.now();
-            let clientPollTimeoutMs = DEFAULT_CLIENT_POLL_TIMEOUT_MS;
-            activePollInterval = setInterval(() => {
-                if (Date.now() - pollStartedAt > clientPollTimeoutMs) {
-                    clearInterval(activePollInterval);
-                    activePollInterval = null;
-                    showLoader(false);
-                    setStatus("❌ Timeout côté interface. Le traitement est trop long.", "error");
-                    showUserFeedback("Le serveur met trop de temps à répondre. Réessaie avec un PDF plus léger ou relance l'extraction.");
-                    return;
-                }
-                fetchJson(`/status/${jobId}`)
-                    .then(data => {
-                        if (Number.isFinite(data.timeout_seconds) && data.timeout_seconds > 0) {
-                            clientPollTimeoutMs = (data.timeout_seconds * 1000) + CLIENT_TIMEOUT_SAFETY_BUFFER_MS;
-                        }
-                        if (data.status === "done") {
-                            clearInterval(activePollInterval);
-                            activePollInterval = null;
-                            if (resultsClosedByUser) return;
-                            showLoader(false);
-                            fetchJson(`/results/${jobId}`)
-                                .then(resultData => {
-                                    const produits = resultData.produits || [];
-                                    if (!produits.length) {
-                                        setStatus("⚠️ Extraction terminée, mais aucun produit n'a été trouvé.", "error");
-                                        showUserFeedback("Aucun résultat exploitable n'a été détecté dans ce PDF. Vérifie la qualité du PDF ou réessaie avec un autre fichier.");
-                                        return;
-                                    }
-                                    setStatus(`✅ ${produits.length} produits extraits.`, "success");
-                                    renderResults(produits, jobId, pdfName);
-                                })
-                                .catch((err) => {
-                                    setStatus("❌ Impossible de charger les résultats : " + err.message, "error");
-                                });
-                        } else if (data.status === "error") {
-                            clearInterval(activePollInterval);
-                            activePollInterval = null;
-                            showLoader(false);
-                            setStatus("❌ Erreur : " + data.error, "error");
-                        }
-                    })
-                    .catch((err) => {
-                        // Tolère les erreurs transitoires réseau/proxy en continuant le polling.
-                        setStatus("⚠️ Problème temporaire de statut, nouvelle tentative...", "info");
-                        if (Date.now() - pollStartedAt > clientPollTimeoutMs) {
-                            clearInterval(activePollInterval);
-                            activePollInterval = null;
-                            showLoader(false);
-                            setStatus("❌ Impossible de récupérer le statut du job : " + err.message, "error");
-                        }
-                    });
-            }, 2000);
-        }
+  <!-- ═══ RESULTS ═══════════════════════════════════════════════ -->
+  <div id="results" class="hidden">
 
-        function renderResults(produits, jobId, pdfName) {
-            document.getElementById("results").classList.remove("hidden");
-            document.body.classList.add("has-results");
-            setTopPanelCollapsed(true);
-            document.getElementById("jsonOutput").textContent = JSON.stringify(produits, null, 2);
-            document.getElementById("selectedPdfName").textContent = pdfName || "PDF";
-            pdfViewer.src = `/pdf/${jobId}`;
+    <!-- Toolbar -->
+    <div class="results-toolbar">
+      <div class="results-heading">
+        <span class="results-title">Résultats</span>
+        <span id="resultsSummary" class="results-summary hidden"></span>
+      </div>
+      <div class="results-actions">
+        <button id="togglePdfBtn" class="toggle-pdf-btn">Masquer le PDF</button>
+        <button id="closeResultsBtn" class="close-results-btn" title="Fermer les résultats" aria-label="Fermer les résultats">✕</button>
+      </div>
+    </div>
 
-            const tbody = document.getElementById("tbody");
-            tbody.innerHTML = "";
-            produits.forEach(p => {
-                const tr = document.createElement("tr");
-                const imgSrc = p.image_path ? `/images/${jobId}/${p.image_path}` : "";
-                const imgTag = imgSrc
-                    ? `<img src="${imgSrc}" class="prod-img" alt="" loading="lazy" onerror="this.replaceWith(document.createTextNode('—'))">`
-                    : "—";
-                tr.innerHTML = `
-                    <td>${imgTag}</td>
-                    <td><strong>${p.nom_produit || "—"}</strong><br><small>${p.description || ""}</small></td>
-                    <td>${p.prix ? p.prix + " €" : "—"}</td>
-                    <td>${p.prix_unitaire ? p.prix_unitaire + " €" : "—"}</td>
-                    <td>${p.conditionnement || "—"}</td>
-                    <td>${p.promo_description || "—"}</td>
-                    <td>${p.rayon || "—"}</td>
-                    <td>${p.enseigne || "—"}</td>
-                    <td>${p.date_debut || "—"} → ${p.date_fin || "—"}</td>
-                    <td>${p._page || "—"}</td>
-                    `;
-                tbody.appendChild(tr);
-            });
-        }
+    <!-- Layout: PDF aside + main table -->
+    <div id="resultsLayout" class="results-layout">
 
-        function resetResults() {
-            document.getElementById("results").classList.add("hidden");
-            document.body.classList.remove("has-results");
-            setTopPanelCollapsed(false);
-            document.getElementById("tbody").innerHTML = "";
-            document.getElementById("jsonOutput").textContent = "";
-            document.getElementById("selectedPdfName").textContent = "—";
-            resultsSummary.textContent = "";
-            resultsSummary.classList.add("hidden");
-            pdfViewer.src = "";
-            isPdfVisible = true;
-            pdfPanel.classList.remove("hidden");
-            resultsLayout.classList.remove("pdf-hidden");
-            togglePdfBtn.textContent = "Masquer le PDF";
-        }
+      <!-- PDF panel -->
+      <aside id="pdfPanel" class="pdf-panel">
+        <p class="selected-pdf">
+          <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          <strong id="selectedPdfName">—</strong>
+        </p>
+        <div class="pdf-viewer">
+          <iframe id="pdfViewer" title="Aperçu du PDF"></iframe>
+        </div>
+      </aside>
 
-        function setTopPanelCollapsed(collapsed) {
-            isTopPanelCollapsed = collapsed;
-            topPanel.classList.toggle("collapsed", collapsed);
-            toggleTopPanelBtn.classList.toggle("hidden", !document.body.classList.contains("has-results"));
-            toggleTopPanelBtn.classList.toggle("expanded", !collapsed);
-            toggleTopPanelBtn.title = collapsed ? "Afficher les options" : "Masquer les options";
-        }
+      <!-- Main content -->
+      <section class="results-main">
+        <div class="tabs">
+          <button class="tab active" onclick="showTab('tableau', this)">Tableau produits</button>
+          <button class="tab" onclick="showTab('json', this)">JSON brut</button>
+        </div>
 
-        function toggleTopPanel() {
-            setTopPanelCollapsed(!isTopPanelCollapsed);
-        }
+        <div id="tableau" class="tab-content">
+          <table id="produitsTable">
+            <thead>
+              <tr>
+                <th>Image</th>
+                <th>Produit</th>
+                <th>Prix</th>
+                <th>Prix unitaire</th>
+                <th>Conditionnement</th>
+                <th>Promo</th>
+                <th>Rayon</th>
+                <th>Enseigne</th>
+                <th>Dates</th>
+                <th>Page</th>
+              </tr>
+            </thead>
+            <tbody id="tbody"></tbody>
+          </table>
+        </div>
 
-        function closeResults() {
-            resultsClosedByUser = true;
-            if (activePollInterval) {
-                clearInterval(activePollInterval);
-                activePollInterval = null;
-            }
-            resetResults();
+        <div id="json" class="tab-content hidden">
+          <pre id="jsonOutput"></pre>
+        </div>
+      </section>
+
+    </div>
+  </div><!-- /results -->
+
+</div><!-- /container -->
+
+<!-- Lightbox -->
+<div id="imageLightbox" class="image-lightbox hidden" role="dialog" aria-modal="true" aria-label="Image agrandie">
+  <button type="button" class="image-lightbox-close" aria-label="Fermer">✕</button>
+  <img id="lightboxImg" class="image-lightbox-img" alt="">
+</div>
+
+<script>
+  const dropZone          = document.getElementById("dropZone");
+  const fileInput         = document.getElementById("fileInput");
+  const useDefaultBtn     = document.getElementById("useDefaultBtn");
+  const pdfViewer         = document.getElementById("pdfViewer");
+  const pdfPanel          = document.getElementById("pdfPanel");
+  const topPanel          = document.getElementById("topPanel");
+  const toggleTopPanelBtn = document.getElementById("toggleTopPanelBtn");
+  const toggleTopPanelLabel = document.getElementById("toggleTopPanelLabel");
+  const togglePdfBtn      = document.getElementById("togglePdfBtn");
+  const closeResultsBtn   = document.getElementById("closeResultsBtn");
+  const resultsSummary    = document.getElementById("resultsSummary");
+  const userFeedback      = document.getElementById("userFeedback");
+  const resultsLayout     = document.getElementById("resultsLayout");
+  const imageLightbox     = document.getElementById("imageLightbox");
+  const lightboxImg       = document.getElementById("lightboxImg");
+
+  let isPdfVisible = true;
+  let isTopPanelCollapsed = false;
+  let activePollInterval = null;
+  let resultsClosedByUser = false;
+
+  const DEFAULT_CLIENT_POLL_TIMEOUT_MS = 4 * 60 * 1000;
+  const CLIENT_TIMEOUT_SAFETY_BUFFER_MS = 30 * 1000;
+
+  dropZone.addEventListener("click", () => fileInput.click());
+  dropZone.addEventListener("dragover", e => { e.preventDefault(); dropZone.classList.add("hover"); });
+  dropZone.addEventListener("dragleave", () => dropZone.classList.remove("hover"));
+  dropZone.addEventListener("drop", e => {
+    e.preventDefault();
+    dropZone.classList.remove("hover");
+    handleFile(e.dataTransfer.files[0]);
+  });
+  fileInput.addEventListener("change", () => handleFile(fileInput.files[0]));
+  useDefaultBtn.addEventListener("click", useDefaultPdf);
+  toggleTopPanelBtn.addEventListener("click", toggleTopPanel);
+  togglePdfBtn.addEventListener("click", togglePdfPanel);
+  closeResultsBtn.addEventListener("click", closeResults);
+
+  imageLightbox.addEventListener("click", e => {
+    if (e.target === imageLightbox || e.target.closest(".image-lightbox-close")) closeLightbox();
+  });
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape" && !imageLightbox.classList.contains("hidden")) closeLightbox();
+  });
+
+  function openLightbox(src, alt) {
+    lightboxImg.src = src;
+    lightboxImg.alt = alt || "Image produit";
+    imageLightbox.classList.remove("hidden");
+    document.body.classList.add("lightbox-open");
+  }
+
+  function closeLightbox() {
+    imageLightbox.classList.add("hidden");
+    lightboxImg.removeAttribute("src");
+    document.body.classList.remove("lightbox-open");
+  }
+
+  async function fetchJson(url, options) {
+    const response = await fetch(url, options);
+    const raw = await response.text();
+    let data = {};
+    try { data = raw ? JSON.parse(raw) : {}; }
+    catch (_) { throw new Error(`Réponse invalide (${response.status})`); }
+    if (!response.ok) throw new Error(data.error || `Erreur HTTP ${response.status}`);
+    return data;
+  }
+
+  function handleFile(file) {
+    if (!file || !file.name.endsWith(".pdf")) {
+      setStatus("Merci de déposer un fichier PDF.", "error");
+      return;
+    }
+    clearUserFeedback();
+    resultsClosedByUser = false;
+    resetResults();
+    const formData = new FormData();
+    formData.append("pdf", file);
+    setStatus("Envoi du fichier…", "info");
+    showLoader(true);
+    fetchJson("/upload", { method: "POST", body: formData })
+      .then(data => {
+        if (data.error) { setStatus("Erreur : " + data.error, "error"); showLoader(false); return; }
+        pollStatus(data.job_id, data.pdf_name);
+      })
+      .catch(err => { setStatus(err.message, "error"); showLoader(false); });
+  }
+
+  function useDefaultPdf() {
+    clearUserFeedback();
+    resultsClosedByUser = false;
+    resetResults();
+    setStatus("Lancement de l'extraction…", "info");
+    showLoader(true);
+    fetchJson("/use-default-pdf", { method: "POST" })
+      .then(data => {
+        if (data.error) { setStatus("Erreur : " + data.error, "error"); showLoader(false); return; }
+        pollStatus(data.job_id, data.pdf_name);
+      })
+      .catch(err => { setStatus(err.message, "error"); showLoader(false); });
+  }
+
+  function pollStatus(jobId, pdfName) {
+    setStatus("Extraction en cours, ça peut prendre une minute…", "info");
+    if (activePollInterval) clearInterval(activePollInterval);
+    const pollStartedAt = Date.now();
+    let clientPollTimeoutMs = DEFAULT_CLIENT_POLL_TIMEOUT_MS;
+
+    activePollInterval = setInterval(() => {
+      if (Date.now() - pollStartedAt > clientPollTimeoutMs) {
+        clearInterval(activePollInterval); activePollInterval = null;
+        showLoader(false);
+        setStatus("Timeout côté interface. Le traitement est trop long.", "error");
+        showUserFeedback("Le serveur met trop de temps à répondre. Réessaie avec un PDF plus léger ou relance l'extraction.");
+        return;
+      }
+      fetchJson(`/status/${jobId}`)
+        .then(data => {
+          if (Number.isFinite(data.timeout_seconds) && data.timeout_seconds > 0)
+            clientPollTimeoutMs = data.timeout_seconds * 1000 + CLIENT_TIMEOUT_SAFETY_BUFFER_MS;
+
+          if (data.status === "done") {
+            clearInterval(activePollInterval); activePollInterval = null;
+            if (resultsClosedByUser) return;
             showLoader(false);
-            clearUserFeedback();
-            const status = document.getElementById("status");
-            status.textContent = "";
-            status.className = "status hidden";
-        }
+            fetchJson(`/results/${jobId}`)
+              .then(resultData => {
+                const produits = resultData.produits || [];
+                if (!produits.length) {
+                  setStatus("Extraction terminée, mais aucun produit n'a été trouvé.", "error");
+                  showUserFeedback("Aucun résultat exploitable détecté. Vérifie la qualité du PDF ou réessaie avec un autre fichier.");
+                  return;
+                }
+                setStatus(`✓ ${produits.length} produits extraits.`, "success");
+                renderResults(produits, jobId, pdfName);
+              })
+              .catch(err => setStatus("Impossible de charger les résultats : " + err.message, "error"));
 
-        function togglePdfPanel() {
-            isPdfVisible = !isPdfVisible;
-            pdfPanel.classList.toggle("hidden", !isPdfVisible);
-            resultsLayout.classList.toggle("pdf-hidden", !isPdfVisible);
-            togglePdfBtn.textContent = isPdfVisible ? "Masquer le PDF" : "Afficher le PDF";
-        }
+          } else if (data.status === "error") {
+            clearInterval(activePollInterval); activePollInterval = null;
+            showLoader(false);
+            setStatus("Erreur : " + data.error, "error");
+          }
+        })
+        .catch(err => {
+          setStatus("Problème temporaire, nouvelle tentative…", "info");
+          if (Date.now() - pollStartedAt > clientPollTimeoutMs) {
+            clearInterval(activePollInterval); activePollInterval = null;
+            showLoader(false);
+            setStatus("Impossible de récupérer le statut : " + err.message, "error");
+          }
+        });
+    }, 2000);
+  }
 
-        function showTab(name, clickedTab) {
-            document.querySelectorAll(".tab-content").forEach(el => el.classList.add("hidden"));
-            document.querySelectorAll(".tab").forEach(el => el.classList.remove("active"));
-            document.getElementById(name).classList.remove("hidden");
-            clickedTab.classList.add("active");
-        }
+  function renderResults(produits, jobId, pdfName) {
+    document.getElementById("results").classList.remove("hidden");
+    document.body.classList.add("has-results");
+    setTopPanelCollapsed(true);
+    document.getElementById("jsonOutput").textContent = JSON.stringify(produits, null, 2);
+    document.getElementById("selectedPdfName").textContent = pdfName || "PDF";
+    pdfViewer.src = `/pdf/${jobId}`;
 
-        function setStatus(msg, type) {
-            const el = document.getElementById("status");
-            if (type === "success") {
-                resultsSummary.textContent = msg;
-                resultsSummary.classList.remove("hidden");
-                el.textContent = "";
-                el.className = "status hidden";
-                return;
-            }
-            resultsSummary.textContent = "";
-            resultsSummary.classList.add("hidden");
-            el.textContent = msg;
-            el.className = "status " + type;
-        }
+    const tbody = document.getElementById("tbody");
+    tbody.innerHTML = "";
+    produits.forEach(p => {
+      const tr = document.createElement("tr");
+      const imgSrc = p.image_path ? `/images/${jobId}/${p.image_path}` : "";
+      const imgTag = imgSrc
+        ? `<img src="${imgSrc}" class="prod-img zoomable" alt="" loading="lazy" title="Cliquer pour agrandir" onerror="this.replaceWith(document.createTextNode('—'))">`
+        : "—";
 
-        function showLoader(show) {
-            document.getElementById("loader").classList.toggle("hidden", !show);
-        }
+      const promoHtml = p.promo_description
+        ? `<span class="tag-promo">${p.promo_description}</span>`
+        : "—";
+      const rayonHtml = p.rayon
+        ? `<span class="tag-rayon">${p.rayon}</span>`
+        : "—";
 
-        function showUserFeedback(message) {
-            userFeedback.textContent = message;
-            userFeedback.classList.remove("hidden");
-        }
+      tr.innerHTML = `
+        <td>${imgTag}</td>
+        <td><strong>${p.nom_produit || "—"}</strong><br><small style="color:var(--text-secondary)">${p.description || ""}</small></td>
+        <td style="font-weight:600">${p.prix ? p.prix + " €" : "—"}</td>
+        <td style="color:var(--text-secondary)">${p.prix_unitaire ? p.prix_unitaire + " €" : "—"}</td>
+        <td>${p.conditionnement || "—"}</td>
+        <td>${promoHtml}</td>
+        <td>${rayonHtml}</td>
+        <td>${p.enseigne || "—"}</td>
+        <td style="white-space:nowrap;color:var(--text-secondary);font-size:12px">${p.date_debut || "—"} → ${p.date_fin || "—"}</td>
+        <td style="color:var(--text-tertiary);font-size:12px;text-align:center">${p._page || "—"}</td>
+      `;
+      const img = tr.querySelector("img.prod-img");
+      if (img) {
+        img.alt = p.nom_produit || "Produit";
+        img.addEventListener("click", () => openLightbox(img.src, img.alt));
+      }
+      tbody.appendChild(tr);
+    });
+  }
 
-        function clearUserFeedback() {
-            userFeedback.textContent = "";
-            userFeedback.classList.add("hidden");
-        }
-    </script>
+  function resetResults() {
+    document.getElementById("results").classList.add("hidden");
+    document.body.classList.remove("has-results");
+    setTopPanelCollapsed(false);
+    document.getElementById("tbody").innerHTML = "";
+    document.getElementById("jsonOutput").textContent = "";
+    document.getElementById("selectedPdfName").textContent = "—";
+    resultsSummary.textContent = "";
+    resultsSummary.classList.add("hidden");
+    pdfViewer.src = "";
+    isPdfVisible = true;
+    pdfPanel.classList.remove("hidden");
+    resultsLayout.classList.remove("pdf-hidden");
+    togglePdfBtn.textContent = "Masquer le PDF";
+  }
+
+  function setTopPanelCollapsed(collapsed) {
+    isTopPanelCollapsed = collapsed;
+    topPanel.classList.toggle("collapsed", collapsed);
+    const hasResults = document.body.classList.contains("has-results");
+    toggleTopPanelBtn.classList.toggle("hidden", !hasResults);
+    toggleTopPanelBtn.classList.toggle("expanded", !collapsed);
+    toggleTopPanelBtn.title = collapsed ? "Afficher les options" : "Masquer les options";
+    toggleTopPanelLabel.textContent = collapsed ? "Options d'import" : "Masquer";
+  }
+
+  function toggleTopPanel() { setTopPanelCollapsed(!isTopPanelCollapsed); }
+
+  function closeResults() {
+    closeLightbox();
+    resultsClosedByUser = true;
+    if (activePollInterval) { clearInterval(activePollInterval); activePollInterval = null; }
+    resetResults();
+    showLoader(false);
+    clearUserFeedback();
+    const status = document.getElementById("status");
+    status.textContent = "";
+    status.className = "status hidden";
+  }
+
+  function togglePdfPanel() {
+    isPdfVisible = !isPdfVisible;
+    pdfPanel.classList.toggle("hidden", !isPdfVisible);
+    resultsLayout.classList.toggle("pdf-hidden", !isPdfVisible);
+    togglePdfBtn.textContent = isPdfVisible ? "Masquer le PDF" : "Afficher le PDF";
+  }
+
+  function showTab(name, clickedTab) {
+    document.querySelectorAll(".tab-content").forEach(el => el.classList.add("hidden"));
+    document.querySelectorAll(".tab").forEach(el => el.classList.remove("active"));
+    document.getElementById(name).classList.remove("hidden");
+    clickedTab.classList.add("active");
+  }
+
+  function setStatus(msg, type) {
+    const el = document.getElementById("status");
+    if (type === "success") {
+      resultsSummary.textContent = msg;
+      resultsSummary.classList.remove("hidden");
+      el.textContent = "";
+      el.className = "status hidden";
+      return;
+    }
+    resultsSummary.textContent = "";
+    resultsSummary.classList.add("hidden");
+    el.textContent = msg;
+    el.className = "status " + type;
+    el.classList.remove("hidden");
+  }
+
+  function showLoader(show) {
+    document.getElementById("loader").classList.toggle("hidden", !show);
+  }
+
+  function showUserFeedback(message) {
+    userFeedback.textContent = message;
+    userFeedback.classList.remove("hidden");
+  }
+
+  function clearUserFeedback() {
+    userFeedback.textContent = "";
+    userFeedback.classList.add("hidden");
+  }
+</script>
+
 </body>
-
 </html>
