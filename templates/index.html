@@ -16,7 +16,10 @@
     <!-- Header -->
     <div class="page-header">
       <div class="header-icon">
-        <svg viewBox="0 0 24 24"><path d="M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v18m0 0h10a2 2 0 0 0 2-2V9M9 21H5a2 2 0 0 1-2-2V9m0 0h18"/></svg>
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/>
+        </svg>
       </div>
       <div class="header-text">
         <h1>Extraction catalogue PDF</h1>
@@ -67,6 +70,16 @@
     <div id="userFeedback" class="user-feedback hidden"></div>
 
   </div><!-- /top-panel -->
+
+  <!-- Historique (page d'accueil sans résultats) -->
+  <section id="historySection" class="history-section" aria-label="Historique des extractions">
+    <div class="history-header">
+      <h2 class="history-title">Historique</h2>
+      <span id="historyCount" class="history-count hidden"></span>
+    </div>
+    <p id="historyEmpty" class="history-empty hidden">Aucune extraction enregistrée pour le moment.</p>
+    <ul id="historyList" class="history-list" role="list"></ul>
+  </section>
 
   <!-- Toggle button (shown when results are open) -->
   <button id="toggleTopPanelBtn" class="toggle-top-panel-btn hidden" aria-label="Afficher ou masquer le panneau d'import">
@@ -162,6 +175,15 @@
   const resultsLayout     = document.getElementById("resultsLayout");
   const imageLightbox     = document.getElementById("imageLightbox");
   const lightboxImg       = document.getElementById("lightboxImg");
+  const historySection    = document.getElementById("historySection");
+  const historyList       = document.getElementById("historyList");
+  const historyEmpty      = document.getElementById("historyEmpty");
+  const historyCount      = document.getElementById("historyCount");
+
+  const historyDateFmt = new Intl.DateTimeFormat("fr-FR", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
 
   let isPdfVisible = true;
   let isTopPanelCollapsed = false;
@@ -191,6 +213,8 @@
   document.addEventListener("keydown", e => {
     if (e.key === "Escape" && !imageLightbox.classList.contains("hidden")) closeLightbox();
   });
+
+  loadHistory();
 
   function openLightbox(src, alt) {
     lightboxImg.src = src;
@@ -281,7 +305,7 @@
                   return;
                 }
                 setStatus(`✓ ${produits.length} produits extraits.`, "success");
-                renderResults(produits, jobId, pdfName);
+                renderResults(produits, jobId, pdfName, resultData.has_pdf !== false);
               })
               .catch(err => setStatus("Impossible de charger les résultats : " + err.message, "error"));
 
@@ -302,13 +326,27 @@
     }, 2000);
   }
 
-  function renderResults(produits, jobId, pdfName) {
+  function renderResults(produits, jobId, pdfName, hasPdf = true) {
     document.getElementById("results").classList.remove("hidden");
     document.body.classList.add("has-results");
     setTopPanelCollapsed(true);
     document.getElementById("jsonOutput").textContent = JSON.stringify(produits, null, 2);
     document.getElementById("selectedPdfName").textContent = pdfName || "PDF";
-    pdfViewer.src = `/pdf/${jobId}`;
+
+    if (hasPdf) {
+      pdfViewer.src = `/pdf/${jobId}`;
+      pdfPanel.classList.remove("hidden");
+      resultsLayout.classList.remove("pdf-hidden");
+      isPdfVisible = true;
+      togglePdfBtn.textContent = "Masquer le PDF";
+      togglePdfBtn.classList.remove("hidden");
+    } else {
+      pdfViewer.src = "";
+      pdfPanel.classList.add("hidden");
+      resultsLayout.classList.add("pdf-hidden");
+      isPdfVisible = false;
+      togglePdfBtn.classList.add("hidden");
+    }
 
     const tbody = document.getElementById("tbody");
     tbody.innerHTML = "";
@@ -351,6 +389,7 @@
     document.getElementById("results").classList.add("hidden");
     document.body.classList.remove("has-results");
     setTopPanelCollapsed(false);
+    togglePdfBtn.classList.remove("hidden");
     document.getElementById("tbody").innerHTML = "";
     document.getElementById("jsonOutput").textContent = "";
     document.getElementById("selectedPdfName").textContent = "—";
@@ -361,6 +400,7 @@
     pdfPanel.classList.remove("hidden");
     resultsLayout.classList.remove("pdf-hidden");
     togglePdfBtn.textContent = "Masquer le PDF";
+    loadHistory();
   }
 
   function setTopPanelCollapsed(collapsed) {
@@ -429,6 +469,92 @@
   function clearUserFeedback() {
     userFeedback.textContent = "";
     userFeedback.classList.add("hidden");
+  }
+
+  function escapeHtml(text) {
+    const div = document.createElement("div");
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  async function loadHistory() {
+    try {
+      const data = await fetchJson("/history");
+      renderHistory(data.items || []);
+    } catch (_) {
+      historyList.innerHTML = "";
+      historyEmpty.textContent = "Impossible de charger l'historique.";
+      historyEmpty.classList.remove("hidden");
+      historyCount.classList.add("hidden");
+    }
+  }
+
+  function renderHistory(items) {
+    historyList.innerHTML = "";
+
+    if (!items.length) {
+      historyEmpty.textContent = "Aucune extraction enregistrée pour le moment.";
+      historyEmpty.classList.remove("hidden");
+      historyCount.classList.add("hidden");
+      return;
+    }
+
+    historyEmpty.classList.add("hidden");
+    historyCount.textContent = `${items.length} extraction${items.length > 1 ? "s" : ""}`;
+    historyCount.classList.remove("hidden");
+
+    items.forEach(item => {
+      const li = document.createElement("li");
+      li.className = "history-item";
+      const dateLabel = historyDateFmt.format(new Date(item.finished_at * 1000));
+      const countLabel = `${item.produits_count} produit${item.produits_count > 1 ? "s" : ""}`;
+      const pdfBadge = item.has_pdf ? "" : `<span class="history-badge">PDF non archivé</span>`;
+
+      li.innerHTML = `
+        <button type="button" class="history-item-btn" data-job-id="${item.job_id}">
+          <span class="history-item-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          </span>
+          <span class="history-item-body">
+            <span class="history-item-name">${escapeHtml(item.pdf_name)}</span>
+            <span class="history-item-meta">${escapeHtml(dateLabel)} · ${escapeHtml(countLabel)} ${pdfBadge}</span>
+          </span>
+          <span class="history-item-arrow" aria-hidden="true">→</span>
+        </button>
+      `;
+
+      li.querySelector(".history-item-btn").addEventListener("click", () => {
+        openHistoryJob(item.job_id);
+      });
+      historyList.appendChild(li);
+    });
+  }
+
+  function openHistoryJob(jobId) {
+    resultsClosedByUser = false;
+    clearUserFeedback();
+    resetResults();
+    setStatus("Chargement des résultats…", "info");
+    showLoader(true);
+
+    fetchJson(`/results/${jobId}`)
+      .then(data => {
+        showLoader(false);
+        const produits = data.produits || [];
+        if (!produits.length) {
+          setStatus("Cette extraction ne contient aucun produit.", "error");
+          return;
+        }
+        const pdfLabel = data.has_pdf === false
+          ? `${data.pdf_name} (aperçu PDF indisponible)`
+          : data.pdf_name;
+        setStatus(`✓ ${produits.length} produits — historique`, "success");
+        renderResults(produits, jobId, pdfLabel, data.has_pdf !== false);
+      })
+      .catch(err => {
+        showLoader(false);
+        setStatus("Impossible de charger l'extraction : " + err.message, "error");
+      });
   }
 </script>
 
