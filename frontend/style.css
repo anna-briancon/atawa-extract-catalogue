@@ -246,52 +246,78 @@ body {
 .drop-zone .dz-main { font-size: 13px; font-weight: 500; color: var(--text-primary); }
 .drop-zone .dz-sub  { font-size: 11px; color: var(--text-tertiary); }
 
-/* ─── Status / Loader ─────────────────────────────────────── */
-.status {
-  border-radius: var(--radius-md);
-  padding: 10px 16px;
-  font-size: 13px;
-  font-weight: 500;
+/* ─── Progress / Loader ───────────────────────────────────── */
+.progress-block {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-  transition: max-height 0.2s ease, opacity 0.2s ease;
-  max-height: 60px;
-  overflow: hidden;
+  justify-content: center;
+  gap: 18px;
+  padding: 28px 0px 0px;
+  flex-shrink: 0; 
 }
 
-.status.info {
-  background: var(--blue-100);
-  color: var(--blue-600);
-  border: 1px solid rgba(79,195,213,0.28);
+.progress-message {
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-align: center;
+  line-height: 1.5;
+  max-width: 420px;
 }
 
-.status.success {
-  background: var(--teal-50);
-  color: var(--teal-800);
-  border: 1px solid rgba(34,184,180,0.28);
-}
-
-.status.error {
-  background: #FEF3F2;
+.progress-message--error {
   color: #9B2020;
-  border: 1px solid rgba(155,32,32,0.16);
 }
 
 .hidden { display: none !important; }
 
 .loader {
-  align-self: center;
-  width: 22px; height: 22px;
-  border: 2.5px solid var(--border-strong);
-  border-top-color: var(--teal-400);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
 }
 
-@keyframes spin { to { transform: rotate(360deg); } }
+.loader-logo {
+  width: 96px;
+  height: 96px;
+  overflow: visible;
+  animation: loaderLogoBreath 2.4s ease-in-out infinite;
+  filter: drop-shadow(0 6px 18px rgba(34, 184, 180, 0.18));
+}
+
+.loader-bar {
+  transform-box: fill-box;
+  transform-origin: center bottom;
+  animation: loaderBarWave 1.55s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+
+.loader-bar--1 { animation-delay: 0s; }
+.loader-bar--2 { animation-delay: 0.18s; }
+.loader-bar--3 { animation-delay: 0.36s; }
+
+@keyframes loaderLogoBreath {
+  0%, 100% { transform: scale(1); filter: drop-shadow(0 6px 18px rgba(34, 184, 180, 0.18)); }
+  50% { transform: scale(1.04); filter: drop-shadow(0 10px 28px rgba(34, 184, 180, 0.32)); }
+}
+
+@keyframes loaderBarWave {
+  0%, 100% { transform: translateY(0) scaleY(1); opacity: 1; }
+  35% { transform: translateY(-12px) scaleY(1.06); opacity: 0.92; }
+  70% { transform: translateY(5px) scaleY(0.94); opacity: 0.86; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loader-logo,
+  .loader-bar {
+    animation: none;
+  }
+}
 
 .user-feedback {
   padding: 11px 14px;

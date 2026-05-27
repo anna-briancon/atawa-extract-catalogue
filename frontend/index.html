@@ -60,8 +60,42 @@
       </div>
     </div>
 
-    <div id="status" class="status hidden"></div>
-    <div id="loader" class="loader hidden"></div>
+    <div id="progressBlock" class="progress-block hidden">
+      <div id="loader" class="loader" aria-hidden="true">
+        <svg class="loader-logo" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Chargement">
+          <defs>
+            <linearGradient id="loader-g1" x1="48" y1="398" x2="130" y2="250" gradientUnits="userSpaceOnUse">
+              <stop offset="0" stop-color="#113E7C"/>
+              <stop offset="1" stop-color="#0D5C8E"/>
+            </linearGradient>
+            <linearGradient id="loader-g2" x1="307" y1="392" x2="168" y2="111" gradientUnits="userSpaceOnUse">
+              <stop offset="0" stop-color="#0C6588"/>
+              <stop offset="1" stop-color="#2395AE"/>
+            </linearGradient>
+            <linearGradient id="loader-g3" x1="432" y1="394" x2="329" y2="116" gradientUnits="userSpaceOnUse">
+              <stop offset="0" stop-color="#238EA0"/>
+              <stop offset="1" stop-color="#3CC4C7"/>
+            </linearGradient>
+          </defs>
+          <g transform="rotate(27 98 321)">
+            <g class="loader-bar loader-bar--1">
+              <rect x="61" y="238" width="74" height="166" rx="37" fill="url(#loader-g1)"/>
+            </g>
+          </g>
+          <g transform="rotate(-26 235 257)">
+            <g class="loader-bar loader-bar--2">
+              <rect x="198" y="100" width="74" height="314" rx="37" fill="url(#loader-g2)"/>
+            </g>
+          </g>
+          <g transform="rotate(-26 390 257)">
+            <g class="loader-bar loader-bar--3">
+              <rect x="353" y="100" width="74" height="314" rx="37" fill="url(#loader-g3)"/>
+            </g>
+          </g>
+        </svg>
+      </div>
+      <p id="status" class="progress-message hidden"></p>
+    </div>
     <div id="userFeedback" class="user-feedback hidden"></div>
 
   </div><!-- /top-panel -->
@@ -946,7 +980,8 @@
     if (activePollInterval) { clearInterval(activePollInterval); activePollInterval = null; }
     resetResults(); showLoader(false); clearUserFeedback();
     const status = document.getElementById("status");
-    status.textContent = ""; status.className = "status hidden";
+    status.textContent = ""; status.className = "progress-message hidden";
+    syncProgressBlock();
   }
 
   function togglePdfPanel() {
@@ -963,17 +998,30 @@
     clickedTab.classList.add("active");
   }
 
+  function syncProgressBlock() {
+    const loaderVisible = !document.getElementById("loader").classList.contains("hidden");
+    const statusVisible = !document.getElementById("status").classList.contains("hidden");
+    document.getElementById("progressBlock").classList.toggle("hidden", !loaderVisible && !statusVisible);
+  }
+
   function setStatus(msg, type) {
     const el = document.getElementById("status");
     if (type === "success") {
       resultsSummary.textContent = msg; resultsSummary.classList.remove("hidden");
-      el.textContent = ""; el.className = "status hidden"; return;
+      el.textContent = ""; el.className = "progress-message hidden";
+      syncProgressBlock(); return;
     }
     resultsSummary.textContent = ""; resultsSummary.classList.add("hidden");
-    el.textContent = msg; el.className = "status " + type; el.classList.remove("hidden");
+    el.textContent = msg;
+    el.className = type === "info" ? "progress-message" : "progress-message progress-message--error";
+    el.classList.remove("hidden");
+    syncProgressBlock();
   }
 
-  function showLoader(show) { document.getElementById("loader").classList.toggle("hidden", !show); }
+  function showLoader(show) {
+    document.getElementById("loader").classList.toggle("hidden", !show);
+    syncProgressBlock();
+  }
   function showUserFeedback(msg) { userFeedback.textContent = msg; userFeedback.classList.remove("hidden"); }
   function clearUserFeedback()   { userFeedback.textContent = ""; userFeedback.classList.add("hidden"); }
 
