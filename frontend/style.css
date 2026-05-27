@@ -59,7 +59,7 @@ body {
 
 /* ─── Container ───────────────────────────────────────────── */
 .container {
-  width: min(98vw, 1720px);
+  width: min(98vw, 1800px);
   height: 100vh;
   margin: 0 auto;
   padding: 20px 24px;
@@ -884,8 +884,8 @@ body.lightbox-open { overflow: hidden; }
 
 /* ─── has-results tweaks ──────────────────────────────────── */
 body.has-results .container {
-  width: min(99vw, 1840px);
-  padding: 14px 18px;
+  width: min(98vw, 1800px);
+  padding: 20px 24px;
 }
 
 body.has-results .results-layout {
