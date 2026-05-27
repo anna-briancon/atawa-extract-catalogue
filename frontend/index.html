@@ -6,17 +6,14 @@
   <title>Extraction catalogue</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
-<body>
+<body{% if feature_product_comments %} data-feature-comments{% endif %}>
 
 <div class="container">
 
   <!-- Header -->
   <div class="page-header">
     <div class="header-icon">
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-        <polyline points="14 2 14 8 20 8"/>
-      </svg>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
     </div>
     <div class="header-text">
       <h1>Extraction catalogue PDF</h1>
@@ -27,10 +24,9 @@
   <!-- ═══ TOP PANEL ════════════════════════════════════════════ -->
   <div id="topPanel" class="top-panel">
 
-    <!-- Upload grid: default PDF + drop zone -->
     <div class="upload-grid">
 
-      <!-- Left: PDF par défaut -->
+      <!-- PDF par défaut -->
       <div class="upload-section">
         <span class="section-eyebrow">PDF par défaut</span>
         <div class="default-pdf-card">
@@ -50,7 +46,7 @@
 
       <div class="upload-divider"></div>
 
-      <!-- Right: Drop zone -->
+      <!-- Drop zone -->
       <div class="upload-section">
         <span class="section-eyebrow">Importer un PDF</span>
         <div class="drop-zone" id="dropZone">
@@ -64,33 +60,95 @@
       </div>
     </div>
 
-    <!-- Status / loader / feedback -->
     <div id="status" class="status hidden"></div>
     <div id="loader" class="loader hidden"></div>
     <div id="userFeedback" class="user-feedback hidden"></div>
 
   </div><!-- /top-panel -->
 
-  <!-- Historique (page d'accueil sans résultats) -->
+  <!-- ═══ HISTORIQUE ════════════════════════════════════════════ -->
   <section id="historySection" class="history-section" aria-label="Historique des extractions">
     <div class="history-header">
       <h2 class="history-title">Historique</h2>
-      <span id="historyCount" class="history-count hidden"></span>
+      <div class="history-header-actions">
+        {% if feature_product_comments %}
+        <button type="button" id="showAllErrorsBtn" class="all-errors-btn hidden">Toutes les erreurs</button>
+        {% endif %}
+        <span id="historyCount" class="history-count hidden"></span>
+      </div>
     </div>
     <p id="historyEmpty" class="history-empty hidden">Aucune extraction enregistrée pour le moment.</p>
     <ul id="historyList" class="history-list" role="list"></ul>
   </section>
 
-  <!-- Toggle button (shown when results are open) -->
+  {% if feature_product_comments %}
+  <!-- ═══ TOUTES LES ERREURS ════════════════════════════════════ -->
+  <section id="allErrorsSection" class="all-errors-section hidden" aria-label="Toutes les erreurs signalées">
+    <div class="history-header">
+      <div class="all-errors-header-start">
+        <button type="button" id="backFromErrorsBtn" class="all-errors-back-btn" aria-label="Retour à l'historique">
+          <span class="all-errors-back-chevron" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
+          </span>
+          Historique
+        </button>
+        <h2 class="history-title">Erreurs signalées</h2>
+      </div>
+      <div class="history-header-actions">
+        <div id="allErrorsFilterWrap" class="all-errors-filter-wrap hidden">
+          <button type="button" id="allErrorsFilterToggle" class="all-errors-filter-toggle" aria-expanded="false" aria-controls="allErrorsFilters">
+            Filtrer / Trier
+            <span class="all-errors-filter-chevron" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </span>
+          </button>
+          <div id="allErrorsFilters" class="all-errors-filters hidden" aria-label="Filtres des erreurs">
+            <label class="all-errors-filter-field">
+              <span>Trier par</span>
+              <select id="allErrorsSort" class="all-errors-filter-select">
+                <option value="recent">Plus récentes</option>
+                <option value="oldest">Plus anciennes</option>
+                <option value="pdf_asc">PDF A → Z</option>
+                <option value="product_asc">Produit A → Z</option>
+                <option value="category_asc">Erreur A → Z</option>
+              </select>
+            </label>
+            <label class="all-errors-filter-field">
+              <span>PDF</span>
+              <select id="allErrorsPdfFilter" class="all-errors-filter-select">
+                <option value="">Tous les PDF</option>
+              </select>
+            </label>
+            <label class="all-errors-filter-field">
+              <span>Produit</span>
+              <input id="allErrorsProductFilter" class="all-errors-filter-input" type="text" placeholder="Nom produit..." />
+            </label>
+            <label class="all-errors-filter-field">
+              <span>Erreur</span>
+              <select id="allErrorsCategoryFilter" class="all-errors-filter-select">
+                <option value="">Toutes les erreurs</option>
+              </select>
+            </label>
+            <button type="button" id="allErrorsFilterReset" class="all-errors-filter-reset">Réinitialiser</button>
+          </div>
+        </div>
+        <span id="allErrorsCount" class="history-count hidden" aria-live="polite"></span>
+      </div>
+    </div>
+    <p id="allErrorsEmpty" class="history-empty hidden">Aucune erreur signalée pour le moment.</p>
+    <ul id="allErrorsList" class="all-errors-list" role="list"></ul>
+  </section>
+  {% endif %}
+
+  <!-- Toggle top-panel -->
   <button id="toggleTopPanelBtn" class="toggle-top-panel-btn hidden" aria-label="Afficher ou masquer le panneau d'import">
     <span class="toggle-top-panel-icon" aria-hidden="true"></span>
     <span id="toggleTopPanelLabel">Options d'import</span>
   </button>
 
-  <!-- ═══ RESULTS ═══════════════════════════════════════════════ -->
+  <!-- ═══ RÉSULTATS ════════════════════════════════════════════ -->
   <div id="results" class="hidden">
 
-    <!-- Toolbar -->
     <div class="results-toolbar">
       <div class="results-heading">
         <span class="results-title">Résultats</span>
@@ -102,21 +160,18 @@
       </div>
     </div>
 
-    <!-- Layout: PDF aside + main table -->
     <div id="resultsLayout" class="results-layout">
 
-      <!-- PDF panel -->
       <aside id="pdfPanel" class="pdf-panel">
         <p class="selected-pdf">
           <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-          <strong id="selectedPdfName">-</strong>
+          <strong id="selectedPdfName">—</strong>
         </p>
         <div class="pdf-viewer">
           <iframe id="pdfViewer" title="Aperçu du PDF"></iframe>
         </div>
       </aside>
 
-      <!-- Main content -->
       <section class="results-main">
         <div class="tabs">
           <button class="tab active" onclick="showTab('tableau', this)">Tableau produits</button>
@@ -127,16 +182,9 @@
           <table id="produitsTable">
             <thead>
               <tr>
-                <th>Image</th>
-                <th>Produit</th>
-                <th>Prix</th>
-                <th>Prix unitaire</th>
-                <th>Conditionnement</th>
-                <th>Promo</th>
-                <th>Rayon</th>
-                <th>Enseigne</th>
-                <th>Dates</th>
-                <th>Page</th>
+                <th>Image</th><th>Produit</th><th>Prix</th><th>Prix unitaire</th>
+                <th>Conditionnement</th><th>Promo</th><th>Rayon</th>
+                <th>Enseigne</th><th>Dates</th><th>Page</th>
               </tr>
             </thead>
             <tbody id="tbody"></tbody>
@@ -159,118 +207,592 @@
   <img id="lightboxImg" class="image-lightbox-img" alt="">
 </div>
 
-<script>
-  const dropZone          = document.getElementById("dropZone");
-  const fileInput         = document.getElementById("fileInput");
-  const useDefaultBtn     = document.getElementById("useDefaultBtn");
-  const pdfViewer         = document.getElementById("pdfViewer");
-  const pdfPanel          = document.getElementById("pdfPanel");
-  const topPanel          = document.getElementById("topPanel");
-  const toggleTopPanelBtn = document.getElementById("toggleTopPanelBtn");
-  const toggleTopPanelLabel = document.getElementById("toggleTopPanelLabel");
-  const togglePdfBtn      = document.getElementById("togglePdfBtn");
-  const closeResultsBtn   = document.getElementById("closeResultsBtn");
-  const resultsSummary    = document.getElementById("resultsSummary");
-  const userFeedback      = document.getElementById("userFeedback");
-  const resultsLayout     = document.getElementById("resultsLayout");
-  const imageLightbox     = document.getElementById("imageLightbox");
-  const lightboxImg       = document.getElementById("lightboxImg");
-  const historySection    = document.getElementById("historySection");
-  const historyList       = document.getElementById("historyList");
-  const historyEmpty      = document.getElementById("historyEmpty");
-  const historyCount      = document.getElementById("historyCount");
+{% if feature_product_comments %}
+<div id="commentPanelHost" class="comment-panel-host hidden" aria-hidden="true">
+  <div id="inlineCommentPanel" class="row-comment-panel">
+    <div class="row-comment-panel-body">
+      <div class="row-comment-panel-form">
+        <div class="row-comment-panel-header">
+          <h3 class="comment-section-heading">Ajouter une erreur</h3>
+          <button type="button" id="collapseCommentPanelBtn" class="row-comment-panel-close" aria-label="Replier">✕</button>
+        </div>
+        <div class="comment-form-row">
+          <div class="comment-form-col comment-form-col--left">
+            <label class="comment-field comment-field--category">
+              <span class="comment-label">Champ concerné</span>
+              <select id="commentCategory" class="comment-select"></select>
+            </label>
+            <p id="commentFormFeedback" class="comment-form-feedback hidden" role="alert"></p>
+            <div class="comment-actions">
+              <button type="button" id="saveCommentBtn" class="comment-save-btn">Ajouter l'erreur</button>
+            </div>
+          </div>
+          <label class="comment-field comment-field--description">
+            <span class="comment-label">Description du problème</span>
+            <textarea id="commentText" class="comment-textarea" rows="2" placeholder="Décrivez l'erreur constatée…"></textarea>
+          </label>
+        </div>
+      </div>
+      <div id="commentExistingSection" class="comment-existing-section hidden">
+        <h3 class="comment-section-heading">Erreurs déjà signalées</h3>
+        <ul id="commentExistingList" class="comment-existing-list"></ul>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
 
-  const historyDateFmt = new Intl.DateTimeFormat("fr-FR", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
+<script>
+  const FEATURE_COMMENTS = document.body.hasAttribute("data-feature-comments");
+
+  const dropZone            = document.getElementById("dropZone");
+  const fileInput           = document.getElementById("fileInput");
+  const useDefaultBtn       = document.getElementById("useDefaultBtn");
+  const pdfViewer           = document.getElementById("pdfViewer");
+  const pdfPanel            = document.getElementById("pdfPanel");
+  const topPanel            = document.getElementById("topPanel");
+  const pageHeader          = document.querySelector(".page-header");
+  const toggleTopPanelBtn   = document.getElementById("toggleTopPanelBtn");
+  const toggleTopPanelLabel = document.getElementById("toggleTopPanelLabel");
+  const togglePdfBtn        = document.getElementById("togglePdfBtn");
+  const closeResultsBtn     = document.getElementById("closeResultsBtn");
+  const resultsSummary      = document.getElementById("resultsSummary");
+  const userFeedback        = document.getElementById("userFeedback");
+  const resultsLayout       = document.getElementById("resultsLayout");
+  const imageLightbox       = document.getElementById("imageLightbox");
+  const lightboxImg         = document.getElementById("lightboxImg");
+  const historySection      = document.getElementById("historySection");
+  const historyList         = document.getElementById("historyList");
+  const historyEmpty        = document.getElementById("historyEmpty");
+  const historyCount        = document.getElementById("historyCount");
+
+  const historyDateFmt = new Intl.DateTimeFormat("fr-FR", { dateStyle: "medium", timeStyle: "short" });
 
   let isPdfVisible = true;
   let isTopPanelCollapsed = false;
   let activePollInterval = null;
   let resultsClosedByUser = false;
   let currentResultsJobId = null;
+  let currentProduits = [];
+  let currentResultsHasPdf = false;
 
-  const DEFAULT_CLIENT_POLL_TIMEOUT_MS = 4 * 60 * 1000;
-  const CLIENT_TIMEOUT_SAFETY_BUFFER_MS = 30 * 1000;
+  const COMMENT_CATEGORY_LABELS = {
+    image: "Image", produit: "Produit", description: "Description",
+    prix: "Prix", prix_unitaire: "Prix unitaire", conditionnement: "Conditionnement",
+    promo: "Promo", rayon: "Rayon", enseigne: "Enseigne", dates: "Dates", autre: "Autre",
+  };
+
+  let selectedProductIndex = null;
+  let commentsByProduct = {};
+  let commentsLoadingPromise = null;
+  const TABLE_COL_COUNT = 10;
+
+  const commentPanelHost        = FEATURE_COMMENTS ? document.getElementById("commentPanelHost") : null;
+  const inlineCommentPanel      = FEATURE_COMMENTS ? document.getElementById("inlineCommentPanel") : null;
+  const collapseCommentPanelBtn = FEATURE_COMMENTS ? document.getElementById("collapseCommentPanelBtn") : null;
+  const commentCategory         = FEATURE_COMMENTS ? document.getElementById("commentCategory") : null;
+  const commentText             = FEATURE_COMMENTS ? document.getElementById("commentText") : null;
+  const saveCommentBtn          = FEATURE_COMMENTS ? document.getElementById("saveCommentBtn") : null;
+  const commentExistingSection  = FEATURE_COMMENTS ? document.getElementById("commentExistingSection") : null;
+  const commentExistingList     = FEATURE_COMMENTS ? document.getElementById("commentExistingList") : null;
+  const commentFormFeedback     = FEATURE_COMMENTS ? document.getElementById("commentFormFeedback") : null;
+  const showAllErrorsBtn        = FEATURE_COMMENTS ? document.getElementById("showAllErrorsBtn") : null;
+  const allErrorsSection        = FEATURE_COMMENTS ? document.getElementById("allErrorsSection") : null;
+  const backFromErrorsBtn       = FEATURE_COMMENTS ? document.getElementById("backFromErrorsBtn") : null;
+  const allErrorsList           = FEATURE_COMMENTS ? document.getElementById("allErrorsList") : null;
+  const allErrorsEmpty          = FEATURE_COMMENTS ? document.getElementById("allErrorsEmpty") : null;
+  const allErrorsCount          = FEATURE_COMMENTS ? document.getElementById("allErrorsCount") : null;
+  const allErrorsFilterWrap     = FEATURE_COMMENTS ? document.getElementById("allErrorsFilterWrap") : null;
+  const allErrorsFilterToggle   = FEATURE_COMMENTS ? document.getElementById("allErrorsFilterToggle") : null;
+  const allErrorsFilters        = FEATURE_COMMENTS ? document.getElementById("allErrorsFilters") : null;
+  const allErrorsFilterReset    = FEATURE_COMMENTS ? document.getElementById("allErrorsFilterReset") : null;
+  const allErrorsPdfFilter      = FEATURE_COMMENTS ? document.getElementById("allErrorsPdfFilter") : null;
+  const allErrorsProductFilter  = FEATURE_COMMENTS ? document.getElementById("allErrorsProductFilter") : null;
+  const allErrorsCategoryFilter = FEATURE_COMMENTS ? document.getElementById("allErrorsCategoryFilter") : null;
+  const allErrorsSort           = FEATURE_COMMENTS ? document.getElementById("allErrorsSort") : null;
+  let allErrorsItemsCache = [];
+
+  const DEFAULT_CLIENT_POLL_TIMEOUT_MS   = 4 * 60 * 1000;
+  const CLIENT_TIMEOUT_SAFETY_BUFFER_MS  = 30 * 1000;
 
   dropZone.addEventListener("click", () => fileInput.click());
   dropZone.addEventListener("dragover", e => { e.preventDefault(); dropZone.classList.add("hover"); });
   dropZone.addEventListener("dragleave", () => dropZone.classList.remove("hover"));
-  dropZone.addEventListener("drop", e => {
-    e.preventDefault();
-    dropZone.classList.remove("hover");
-    handleFile(e.dataTransfer.files[0]);
-  });
+  dropZone.addEventListener("drop", e => { e.preventDefault(); dropZone.classList.remove("hover"); handleFile(e.dataTransfer.files[0]); });
   fileInput.addEventListener("change", () => handleFile(fileInput.files[0]));
   useDefaultBtn.addEventListener("click", useDefaultPdf);
   toggleTopPanelBtn.addEventListener("click", toggleTopPanel);
   togglePdfBtn.addEventListener("click", togglePdfPanel);
   closeResultsBtn.addEventListener("click", closeResults);
+  pageHeader?.addEventListener("click", e => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (FEATURE_COMMENTS) hideAllErrorsView();
+    closeResults();
+  });
 
   imageLightbox.addEventListener("click", e => {
     if (e.target === imageLightbox || e.target.closest(".image-lightbox-close")) closeLightbox();
   });
   document.addEventListener("keydown", e => {
-    if (e.key === "Escape" && !imageLightbox.classList.contains("hidden")) closeLightbox();
+    if (e.key !== "Escape") return;
+    if (!imageLightbox.classList.contains("hidden")) closeLightbox();
+    if (FEATURE_COMMENTS && selectedProductIndex !== null) collapseInlineCommentPanel();
   });
+
+  if (FEATURE_COMMENTS) {
+    populateCommentCategorySelect();
+    collapseCommentPanelBtn.addEventListener("click", collapseInlineCommentPanel);
+    saveCommentBtn.addEventListener("click", saveCommentForSelectedRow);
+    commentText.addEventListener("input", clearCommentFormFeedback);
+    showAllErrorsBtn.addEventListener("click", showAllErrorsView);
+    backFromErrorsBtn.addEventListener("click", hideAllErrorsView);
+    allErrorsFilterToggle.addEventListener("click", e => {
+      e.stopPropagation();
+      toggleAllErrorsFilterPanel();
+    });
+    allErrorsFilterReset.addEventListener("click", resetAllErrorsFilters);
+    allErrorsPdfFilter.addEventListener("change", applyAllErrorsFiltersAndRender);
+    allErrorsCategoryFilter.addEventListener("change", applyAllErrorsFiltersAndRender);
+    allErrorsSort.addEventListener("change", applyAllErrorsFiltersAndRender);
+    allErrorsProductFilter.addEventListener("input", applyAllErrorsFiltersAndRender);
+    document.addEventListener("click", e => {
+      if (!allErrorsFilterWrap.contains(e.target)) closeAllErrorsFilterPanel();
+    });
+  }
 
   loadHistory();
 
+  /* ── Lightbox ────────────────────────────────────────────── */
   function openLightbox(src, alt) {
-    lightboxImg.src = src;
-    lightboxImg.alt = alt || "Image produit";
-    imageLightbox.classList.remove("hidden");
-    document.body.classList.add("lightbox-open");
+    lightboxImg.src = src; lightboxImg.alt = alt || "Image produit";
+    imageLightbox.classList.remove("hidden"); document.body.classList.add("lightbox-open");
   }
-
   function closeLightbox() {
-    imageLightbox.classList.add("hidden");
-    lightboxImg.removeAttribute("src");
+    imageLightbox.classList.add("hidden"); lightboxImg.removeAttribute("src");
     document.body.classList.remove("lightbox-open");
   }
 
+  /* ── Fetch helpers ───────────────────────────────────────── */
   async function fetchJson(url, options) {
     const response = await fetch(url, options);
     const raw = await response.text();
     let data = {};
-    try { data = raw ? JSON.parse(raw) : {}; }
-    catch (_) { throw new Error(`Réponse invalide (${response.status})`); }
+    try { data = raw ? JSON.parse(raw) : {}; } catch (_) { throw new Error(`Réponse invalide (${response.status})`); }
     if (!response.ok) throw new Error(data.error || `Erreur HTTP ${response.status}`);
     return data;
   }
+  async function fetchJsonWithBody(url, body) {
+    return fetchJson(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
+  }
 
-  function handleFile(file) {
-    if (!file || !file.name.endsWith(".pdf")) {
-      setStatus("Merci de déposer un fichier PDF.", "error");
+  /* ── Comments ────────────────────────────────────────────── */
+  function populateCommentCategorySelect() {
+    commentCategory.innerHTML = "";
+    Object.entries(COMMENT_CATEGORY_LABELS).forEach(([value, label]) => {
+      const opt = document.createElement("option"); opt.value = value; opt.textContent = label;
+      commentCategory.appendChild(opt);
+    });
+  }
+
+  function collapseInlineCommentPanel() {
+    if (!FEATURE_COMMENTS) return;
+    const tbody = document.getElementById("tbody");
+    if (tbody) {
+      tbody.querySelectorAll(".row-comment-expand").forEach(r => r.classList.add("hidden"));
+      tbody.querySelectorAll("tr.row-clickable").forEach(r => r.classList.remove("row-expanded"));
+    }
+    if (inlineCommentPanel && commentPanelHost && inlineCommentPanel.parentElement !== commentPanelHost)
+      commentPanelHost.appendChild(inlineCommentPanel);
+    selectedProductIndex = null;
+    clearCommentFormFeedback();
+  }
+
+  function openInlineCommentPanel(productIndex) {
+    if (!FEATURE_COMMENTS) return;
+    const tbody = document.getElementById("tbody");
+    if (!tbody || !inlineCommentPanel) return;
+    collapseInlineCommentPanel();
+    selectedProductIndex = productIndex;
+    const expandRow = tbody.querySelector(`tr.row-comment-expand[data-expand-for="${productIndex}"]`);
+    const dataRow   = tbody.querySelector(`tr[data-product-index="${productIndex}"]`);
+    if (!expandRow || !dataRow) return;
+    expandRow.querySelector("td").appendChild(inlineCommentPanel);
+    expandRow.classList.remove("hidden");
+    dataRow.classList.add("row-expanded");
+    commentCategory.value = "autre"; commentText.value = "";
+    clearCommentFormFeedback();
+    renderExistingCommentsInPanel(productIndex);
+    expandRow.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
+
+  function toggleInlineCommentPanel(productIndex) {
+    if (selectedProductIndex === productIndex) { collapseInlineCommentPanel(); return; }
+    openInlineCommentPanel(productIndex);
+  }
+
+  function showCommentFormFeedback(message, type = "error") {
+    if (!commentFormFeedback) return;
+    commentFormFeedback.textContent = message;
+    commentFormFeedback.className = `comment-form-feedback comment-form-feedback--${type}`;
+    commentFormFeedback.classList.remove("hidden");
+  }
+  function clearCommentFormFeedback() {
+    if (!commentFormFeedback) return;
+    commentFormFeedback.textContent = ""; commentFormFeedback.classList.add("hidden");
+  }
+
+  function getCommentsForProduct(idx) { return commentsByProduct[idx] || []; }
+
+  function rebuildCommentsByProduct(items) {
+    commentsByProduct = {};
+    items.forEach(it => {
+      const idx = it.product_index;
+      if (!commentsByProduct[idx]) commentsByProduct[idx] = [];
+      commentsByProduct[idx].push({ id: it.id, category: it.category, comment: it.comment, updated_at: it.updated_at });
+    });
+    Object.values(commentsByProduct).forEach(arr => arr.sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0)));
+  }
+
+  function renderExistingCommentsInPanel(productIndex) {
+    const list = getCommentsForProduct(productIndex);
+    commentExistingList.innerHTML = "";
+    if (!list.length) { commentExistingSection.classList.add("hidden"); return; }
+    commentExistingSection.classList.remove("hidden");
+    list.forEach(entry => {
+      const li = document.createElement("li");
+      li.className = "comment-existing-item";
+      const catLabel = COMMENT_CATEGORY_LABELS[entry.category] || entry.category || "—";
+      const dateLabel = entry.updated_at ? historyDateFmt.format(new Date(entry.updated_at * 1000)) : "";
+      li.innerHTML = `
+        <div class="comment-existing-body">
+          <span class="comment-existing-cat">${escapeHtml(catLabel)}</span>
+          ${dateLabel ? `<span class="comment-existing-date">${escapeHtml(dateLabel)}</span>` : ""}
+          <p class="comment-existing-text">${escapeHtml(entry.comment)}</p>
+        </div>
+        <button type="button" class="comment-existing-delete" aria-label="Supprimer cette erreur" title="Supprimer">✕</button>`;
+      li.querySelector(".comment-existing-delete").addEventListener("click", e => {
+        e.preventDefault(); e.stopPropagation(); deleteCommentById(entry.id, productIndex);
+      });
+      commentExistingList.appendChild(li);
+    });
+  }
+
+  async function ensureCommentsLoaded(jobId) {
+    if (!FEATURE_COMMENTS || !jobId) return;
+    if (commentsLoadingPromise) return commentsLoadingPromise;
+    commentsLoadingPromise = fetchJson(`/comments/${jobId}`)
+      .then(data => {
+        rebuildCommentsByProduct(data.items || []);
+        if (selectedProductIndex !== null) { renderExistingCommentsInPanel(selectedProductIndex); updateCommentIndicators(); }
+      })
+      .finally(() => { commentsLoadingPromise = null; });
+    return commentsLoadingPromise;
+  }
+
+  async function saveCommentForSelectedRow() {
+    if (!FEATURE_COMMENTS || selectedProductIndex === null) return;
+    const jobId = currentResultsJobId; if (!jobId) return;
+    const category = commentCategory.value;
+    const comment = (commentText.value || "").trim();
+    if (!comment) { showCommentFormFeedback("La description ne peut pas être vide.", "error"); commentText.focus(); return; }
+    clearCommentFormFeedback(); showLoader(true);
+    try {
+      const result = await fetchJsonWithBody(`/comments/${jobId}/save`, { product_index: selectedProductIndex, category, comment });
+      setStatus("Erreur ajoutée.", "success"); showCommentFormFeedback("Erreur ajoutée.", "success");
+      const newEntry = { id: result.id || String(Date.now()), category, comment, updated_at: Date.now() / 1000 };
+      if (!commentsByProduct[selectedProductIndex]) commentsByProduct[selectedProductIndex] = [];
+      commentsByProduct[selectedProductIndex].unshift(newEntry);
+      commentText.value = "";
+      renderExistingCommentsInPanel(selectedProductIndex);
+      updateCommentIndicators(); refreshAllErrorsButton();
+    } catch (err) { showCommentFormFeedback("Impossible d'enregistrer : " + err.message, "error"); }
+    finally { showLoader(false); }
+  }
+
+  async function deleteCommentById(commentId, productIndex) {
+    if (!FEATURE_COMMENTS) return;
+    const jobId = currentResultsJobId;
+    if (!jobId) { showCommentFormFeedback("Impossible de supprimer : extraction non chargée.", "error"); return; }
+    if (!commentId) { showCommentFormFeedback("Identifiant de l'erreur manquant.", "error"); return; }
+    if (!confirm("Supprimer cette erreur ?")) return;
+    clearCommentFormFeedback(); showLoader(true);
+    try {
+      await fetchJsonWithBody(`/comments/${jobId}/delete`, { comment_id: commentId, product_index: productIndex });
+      const list = commentsByProduct[productIndex] || [];
+      commentsByProduct[productIndex] = list.filter(e => e.id !== commentId);
+      if (!commentsByProduct[productIndex].length) delete commentsByProduct[productIndex];
+      if (selectedProductIndex === productIndex) renderExistingCommentsInPanel(productIndex);
+      updateCommentIndicators(); refreshAllErrorsButton();
+      showCommentFormFeedback("Erreur supprimée.", "success");
+    } catch (err) { showCommentFormFeedback("Impossible de supprimer : " + err.message, "error"); }
+    finally { showLoader(false); }
+  }
+
+  function updateCommentIndicators() {
+    if (!FEATURE_COMMENTS) return;
+    const tbody = document.getElementById("tbody"); if (!tbody) return;
+    tbody.querySelectorAll("tr[data-product-index]").forEach(row => {
+      const idx = Number(row.getAttribute("data-product-index"));
+      const count = getCommentsForProduct(idx).length;
+      row.classList.toggle("row-has-comment", count > 0);
+      row.classList.toggle("row-expanded", selectedProductIndex === idx);
+      const indicator = row.querySelector(".comment-indicator");
+      if (indicator) {
+        indicator.classList.toggle("hidden", count === 0);
+        indicator.textContent = count >= 1 ? `⚠ ${count}` : "";
+        indicator.title = count > 1 ? `${count} erreurs signalées` : "Erreur signalée";
+      }
+    });
+  }
+
+  function showAllErrorsView() {
+    if (!FEATURE_COMMENTS) return;
+    historySection.classList.add("hidden");
+    allErrorsSection.classList.remove("hidden");
+    loadAllErrors();
+  }
+  function hideAllErrorsView() {
+    if (!FEATURE_COMMENTS) return;
+    closeAllErrorsFilterPanel();
+    allErrorsSection.classList.add("hidden");
+    historySection.classList.remove("hidden");
+  }
+
+  function toggleAllErrorsFilterPanel() {
+    const isOpen = allErrorsFilterToggle.getAttribute("aria-expanded") === "true";
+    if (isOpen) closeAllErrorsFilterPanel();
+    else openAllErrorsFilterPanel();
+  }
+
+  function openAllErrorsFilterPanel() {
+    allErrorsFilterToggle.setAttribute("aria-expanded", "true");
+    allErrorsFilters.classList.remove("hidden");
+  }
+
+  function closeAllErrorsFilterPanel() {
+    allErrorsFilterToggle.setAttribute("aria-expanded", "false");
+    allErrorsFilters.classList.add("hidden");
+  }
+
+  function resetAllErrorsFilters() {
+    allErrorsSort.value = "recent";
+    allErrorsPdfFilter.value = "";
+    allErrorsProductFilter.value = "";
+    allErrorsCategoryFilter.value = "";
+    applyAllErrorsFiltersAndRender();
+  }
+
+  function updateAllErrorsFilterToggleState() {
+    const hasActiveFilter =
+      (allErrorsSort.value && allErrorsSort.value !== "recent") ||
+      (allErrorsPdfFilter.value || "").trim() ||
+      (allErrorsProductFilter.value || "").trim() ||
+      (allErrorsCategoryFilter.value || "").trim();
+    allErrorsFilterToggle.classList.toggle("is-active", hasActiveFilter);
+  }
+
+  async function loadAllErrors() {
+    allErrorsList.innerHTML = "";
+    try {
+      const data = await fetchJson("/comments/all");
+      allErrorsItemsCache = data.items || [];
+      setupAllErrorsFilters(allErrorsItemsCache);
+      applyAllErrorsFiltersAndRender();
+    } catch (err) {
+      allErrorsEmpty.textContent = "Impossible de charger les erreurs : " + err.message;
+      allErrorsEmpty.classList.remove("hidden");
+      allErrorsCount.textContent = ""; allErrorsCount.classList.add("hidden");
+      allErrorsFilterWrap.classList.add("hidden");
+      closeAllErrorsFilterPanel();
+    }
+  }
+
+  function normalizeCommentCategory(category) {
+    const key = String(category || "autre").trim();
+    return COMMENT_CATEGORY_LABELS[key] ? key : "autre";
+  }
+
+  function setupAllErrorsFilters(items) {
+    if (!FEATURE_COMMENTS) return;
+    const pdfValues = new Set();
+    const categoryValues = new Set();
+    items.forEach(item => {
+      pdfValues.add(String(item.pdf_name || "").trim());
+      categoryValues.add(normalizeCommentCategory(item.category));
+    });
+
+    allErrorsPdfFilter.innerHTML = `<option value="">Tous les PDF</option>`;
+    [...pdfValues].filter(Boolean).sort((a, b) => a.localeCompare(b, "fr")).forEach(pdfName => {
+      const opt = document.createElement("option");
+      opt.value = pdfName;
+      opt.textContent = pdfName;
+      allErrorsPdfFilter.appendChild(opt);
+    });
+
+    allErrorsCategoryFilter.innerHTML = `<option value="">Toutes les erreurs</option>`;
+    [...categoryValues].sort((a, b) => {
+      const aLabel = COMMENT_CATEGORY_LABELS[a] || a;
+      const bLabel = COMMENT_CATEGORY_LABELS[b] || b;
+      return aLabel.localeCompare(bLabel, "fr");
+    }).forEach(cat => {
+      const opt = document.createElement("option");
+      opt.value = cat;
+      opt.textContent = COMMENT_CATEGORY_LABELS[cat] || cat;
+      allErrorsCategoryFilter.appendChild(opt);
+    });
+
+    allErrorsFilterWrap.classList.toggle("hidden", items.length === 0);
+    updateAllErrorsFilterToggleState();
+  }
+
+  function applyAllErrorsFiltersAndRender() {
+    if (!FEATURE_COMMENTS) return;
+    const pdfFilter = (allErrorsPdfFilter.value || "").trim();
+    const productFilter = (allErrorsProductFilter.value || "").trim().toLowerCase();
+    const categoryFilter = (allErrorsCategoryFilter.value || "").trim();
+    const sortMode = (allErrorsSort.value || "recent").trim();
+
+    const filtered = allErrorsItemsCache.filter(item => {
+      const itemPdf = String(item.pdf_name || "").trim();
+      const itemProduct = String(item.product_name || "").toLowerCase();
+      const itemCategory = normalizeCommentCategory(item.category);
+      if (pdfFilter && itemPdf !== pdfFilter) return false;
+      if (productFilter && !itemProduct.includes(productFilter)) return false;
+      if (categoryFilter && itemCategory !== categoryFilter) return false;
+      return true;
+    });
+
+    filtered.sort((a, b) => {
+      if (sortMode === "oldest") return (a.updated_at || 0) - (b.updated_at || 0);
+      if (sortMode === "pdf_asc") return String(a.pdf_name || "").localeCompare(String(b.pdf_name || ""), "fr");
+      if (sortMode === "product_asc") return String(a.product_name || "").localeCompare(String(b.product_name || ""), "fr");
+      if (sortMode === "category_asc") {
+        const aCat = COMMENT_CATEGORY_LABELS[normalizeCommentCategory(a.category)] || "";
+        const bCat = COMMENT_CATEGORY_LABELS[normalizeCommentCategory(b.category)] || "";
+        return aCat.localeCompare(bCat, "fr");
+      }
+      return (b.updated_at || 0) - (a.updated_at || 0);
+    });
+
+    renderAllErrors(filtered);
+    updateAllErrorsFilterToggleState();
+  }
+
+  /* ── renderAllErrors — NOUVEAU DESIGN ────────────────────── */
+  function renderAllErrors(items) {
+    allErrorsList.innerHTML = "";
+    if (!items.length) {
+      allErrorsEmpty.textContent = allErrorsItemsCache.length
+        ? "Aucune erreur ne correspond aux filtres."
+        : "Aucune erreur signalée pour le moment.";
+      allErrorsEmpty.classList.remove("hidden");
+      if (allErrorsItemsCache.length) {
+        allErrorsCount.textContent = `0 / ${allErrorsItemsCache.length} erreur${allErrorsItemsCache.length > 1 ? "s" : ""}`;
+        allErrorsCount.classList.remove("hidden");
+      } else {
+        allErrorsCount.textContent = "";
+        allErrorsCount.classList.add("hidden");
+      }
       return;
     }
-    clearUserFeedback();
-    resultsClosedByUser = false;
-    resetResults();
-    const formData = new FormData();
-    formData.append("pdf", file);
-    setStatus("Envoi du fichier…", "info");
-    showLoader(true);
-    fetchJson("/upload", { method: "POST", body: formData })
+    allErrorsEmpty.classList.add("hidden");
+    allErrorsCount.textContent = `${items.length} erreur${items.length > 1 ? "s" : ""}`;
+    allErrorsCount.classList.remove("hidden");
+
+    items.forEach(item => {
+      const li = document.createElement("li");
+      li.className = "all-errors-item";
+
+      const catSlug  = normalizeCommentCategory(item.category);
+      const catLabel = COMMENT_CATEGORY_LABELS[catSlug] || catSlug;
+      const dateLabel = item.updated_at ? historyDateFmt.format(new Date(item.updated_at * 1000)) : "";
+      const pdfBadge  = item.has_pdf === false ? `<span class="all-errors-pdf-badge">PDF non archivé</span>` : "";
+
+      /* miniature ou placeholder */
+      const thumbHtml = item.image_path
+        ? `<img class="all-errors-card-thumb" src="/images/${escapeHtml(item.job_id)}/${escapeHtml(item.image_path)}" alt="" loading="lazy">`
+        : "";
+      const placeholderHtml = `
+        <div class="all-errors-card-thumb-placeholder" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+        </div>`;
+
+      li.innerHTML = `
+        <button type="button" class="all-errors-card" data-cat="${escapeHtml(catSlug)}">
+          ${item.image_path ? thumbHtml : placeholderHtml}
+          <div class="all-errors-card-body">
+            <div class="all-errors-card-top">
+              <span class="all-errors-cat-badge all-errors-cat--${escapeHtml(catSlug)}">${escapeHtml(catLabel)}</span>
+              ${dateLabel ? `<time class="all-errors-card-date">${escapeHtml(dateLabel)}</time>` : ""}
+            </div>
+            <span class="all-errors-card-product">${escapeHtml(item.product_name)}</span>
+            <span class="all-errors-card-source">
+              <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              <span class="all-errors-card-pdf">${escapeHtml(item.pdf_name)}</span>
+              ${pdfBadge}
+            </span>
+            ${item.comment ? `<span class="all-errors-card-comment">${escapeHtml(item.comment)}</span>` : ""}
+          </div>
+          <div class="all-errors-card-action" aria-hidden="true">
+            Ouvrir
+            <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+          </div>
+        </button>`;
+
+      li.querySelector(".all-errors-card").addEventListener("click", () => {
+        hideAllErrorsView();
+        openHistoryJobAtProduct(item.job_id, item.product_index);
+      });
+
+      allErrorsList.appendChild(li);
+    });
+  }
+
+  function openHistoryJobAtProduct(jobId, productIndex) {
+    resultsClosedByUser = false; clearUserFeedback(); resetResults();
+    setStatus("Chargement…", "info"); showLoader(true);
+    fetchJson(`/results/${jobId}`)
       .then(data => {
-        if (data.error) { setStatus("Erreur : " + data.error, "error"); showLoader(false); return; }
-        pollStatus(data.job_id, data.pdf_name);
+        showLoader(false);
+        const produits = data.produits || [];
+        if (!produits.length) { setStatus("Extraction vide.", "error"); return; }
+        const pdfLabel = data.has_pdf === false ? `${data.pdf_name} (aperçu PDF indisponible)` : data.pdf_name;
+        setStatus(`✓ ${produits.length} produits`, "success");
+        renderResults(produits, jobId, pdfLabel, data.has_pdf !== false);
+        if (FEATURE_COMMENTS && productIndex >= 0 && productIndex < produits.length) {
+          ensureCommentsLoaded(jobId).then(() => { openInlineCommentPanel(productIndex); updateCommentIndicators(); });
+        }
       })
+      .catch(err => { showLoader(false); setStatus("Impossible de charger : " + err.message, "error"); });
+  }
+
+  async function refreshAllErrorsButton() {
+    if (!FEATURE_COMMENTS || !showAllErrorsBtn) return;
+    try {
+      const data = await fetchJson("/comments/all");
+      const count = (data.items || []).length;
+      showAllErrorsBtn.classList.toggle("hidden", count === 0);
+      showAllErrorsBtn.textContent = count > 0 ? `Toutes les erreurs (${count})` : "Toutes les erreurs";
+    } catch (_) { showAllErrorsBtn.classList.add("hidden"); }
+  }
+
+  /* ── File upload ─────────────────────────────────────────── */
+  function handleFile(file) {
+    if (!file || !file.name.endsWith(".pdf")) { setStatus("Merci de déposer un fichier PDF.", "error"); return; }
+    clearUserFeedback(); resultsClosedByUser = false; resetResults();
+    const formData = new FormData(); formData.append("pdf", file);
+    setStatus("Envoi du fichier…", "info"); showLoader(true);
+    fetchJson("/upload", { method: "POST", body: formData })
+      .then(data => { if (data.error) { setStatus("Erreur : " + data.error, "error"); showLoader(false); return; } pollStatus(data.job_id, data.pdf_name); })
       .catch(err => { setStatus(err.message, "error"); showLoader(false); });
   }
 
   function useDefaultPdf() {
-    clearUserFeedback();
-    resultsClosedByUser = false;
-    resetResults();
-    setStatus("Lancement de l'extraction…", "info");
-    showLoader(true);
+    clearUserFeedback(); resultsClosedByUser = false; resetResults();
+    setStatus("Lancement de l'extraction…", "info"); showLoader(true);
     fetchJson("/use-default-pdf", { method: "POST" })
-      .then(data => {
-        if (data.error) { setStatus("Erreur : " + data.error, "error"); showLoader(false); return; }
-        pollStatus(data.job_id, data.pdf_name);
-      })
+      .then(data => { if (data.error) { setStatus("Erreur : " + data.error, "error"); showLoader(false); return; } pollStatus(data.job_id, data.pdf_name); })
       .catch(err => { setStatus(err.message, "error"); showLoader(false); });
   }
 
@@ -282,8 +804,7 @@
 
     activePollInterval = setInterval(() => {
       if (Date.now() - pollStartedAt > clientPollTimeoutMs) {
-        clearInterval(activePollInterval); activePollInterval = null;
-        showLoader(false);
+        clearInterval(activePollInterval); activePollInterval = null; showLoader(false);
         setStatus("Timeout côté interface. Le traitement est trop long.", "error");
         showUserFeedback("Le serveur met trop de temps à répondre. Réessaie avec un PDF plus léger ou relance l'extraction.");
         return;
@@ -292,7 +813,6 @@
         .then(data => {
           if (Number.isFinite(data.timeout_seconds) && data.timeout_seconds > 0)
             clientPollTimeoutMs = data.timeout_seconds * 1000 + CLIENT_TIMEOUT_SAFETY_BUFFER_MS;
-
           if (data.status === "done") {
             clearInterval(activePollInterval); activePollInterval = null;
             if (resultsClosedByUser) return;
@@ -300,35 +820,29 @@
             fetchJson(`/results/${jobId}`)
               .then(resultData => {
                 const produits = resultData.produits || [];
-                if (!produits.length) {
-                  setStatus("Extraction terminée, mais aucun produit n'a été trouvé.", "error");
-                  showUserFeedback("Aucun résultat exploitable détecté. Vérifie la qualité du PDF ou réessaie avec un autre fichier.");
-                  return;
-                }
+                if (!produits.length) { setStatus("Extraction terminée, mais aucun produit n'a été trouvé.", "error"); showUserFeedback("Aucun résultat exploitable détecté."); return; }
                 setStatus(`✓ ${produits.length} produits extraits.`, "success");
                 renderResults(produits, jobId, pdfName, resultData.has_pdf !== false);
               })
               .catch(err => setStatus("Impossible de charger les résultats : " + err.message, "error"));
-
           } else if (data.status === "error") {
             clearInterval(activePollInterval); activePollInterval = null;
-            showLoader(false);
-            setStatus("Erreur : " + data.error, "error");
+            showLoader(false); setStatus("Erreur : " + data.error, "error");
           }
         })
         .catch(err => {
           setStatus("Problème temporaire, nouvelle tentative…", "info");
           if (Date.now() - pollStartedAt > clientPollTimeoutMs) {
             clearInterval(activePollInterval); activePollInterval = null;
-            showLoader(false);
-            setStatus("Impossible de récupérer le statut : " + err.message, "error");
+            showLoader(false); setStatus("Impossible de récupérer le statut : " + err.message, "error");
           }
         });
     }, 2000);
   }
 
+  /* ── Render results ──────────────────────────────────────── */
   function renderResults(produits, jobId, pdfName, hasPdf = true) {
-    currentResultsJobId = jobId;
+    currentResultsJobId = jobId; currentProduits = produits; currentResultsHasPdf = hasPdf;
     document.getElementById("results").classList.remove("hidden");
     document.body.classList.add("has-results");
     setTopPanelCollapsed(true);
@@ -337,71 +851,80 @@
 
     if (hasPdf) {
       pdfViewer.src = `/pdf/${jobId}`;
-      pdfPanel.classList.remove("hidden");
-      resultsLayout.classList.remove("pdf-hidden");
-      isPdfVisible = true;
-      togglePdfBtn.textContent = "Masquer le PDF";
-      togglePdfBtn.classList.remove("hidden");
+      pdfPanel.classList.remove("hidden"); resultsLayout.classList.remove("pdf-hidden");
+      isPdfVisible = true; togglePdfBtn.textContent = "Masquer le PDF"; togglePdfBtn.classList.remove("hidden");
     } else {
-      pdfViewer.src = "";
-      pdfPanel.classList.add("hidden");
-      resultsLayout.classList.add("pdf-hidden");
-      isPdfVisible = false;
-      togglePdfBtn.classList.add("hidden");
+      pdfViewer.src = ""; pdfPanel.classList.add("hidden"); resultsLayout.classList.add("pdf-hidden");
+      isPdfVisible = false; togglePdfBtn.classList.add("hidden");
     }
 
     const tbody = document.getElementById("tbody");
     tbody.innerHTML = "";
-    produits.forEach(p => {
+    produits.forEach((p, index) => {
       const tr = document.createElement("tr");
+      tr.dataset.productIndex = String(index);
       const imgSrc = p.image_path ? `/images/${jobId}/${p.image_path}` : "";
       const imgTag = imgSrc
-        ? `<img src="${imgSrc}" class="prod-img zoomable" alt="" loading="lazy" title="Cliquer pour agrandir" onerror="this.replaceWith(document.createTextNode('-'))">`
-        : "-";
-
-      const promoHtml = p.promo_description
-        ? `<span class="tag-promo">${p.promo_description}</span>`
-        : "-";
-      const rayonHtml = p.rayon
-        ? `<span class="tag-rayon">${p.rayon}</span>`
-        : "-";
+        ? `<img src="${imgSrc}" class="prod-img zoomable" alt="" loading="lazy" title="Cliquer pour agrandir" onerror="this.replaceWith(document.createTextNode('—'))">`
+        : "—";
+      const promoHtml = p.promo_description ? `<span class="tag-promo">${escapeHtml(p.promo_description)}</span>` : "—";
+      const rayonHtml = p.rayon ? `<span class="tag-rayon">${escapeHtml(p.rayon)}</span>` : "—";
+      const commentIndicatorHtml = FEATURE_COMMENTS ? `<span class="comment-indicator hidden" title="Erreur signalée">⚠</span>` : "";
 
       tr.innerHTML = `
         <td>${imgTag}</td>
-        <td><strong>${p.nom_produit || "-"}</strong><br><small style="color:var(--text-secondary)">${p.description || ""}</small></td>
-        <td style="font-weight:600">${p.prix ? p.prix + " €" : "-"}</td>
-        <td style="color:var(--text-secondary)">${p.prix_unitaire ? p.prix_unitaire + " €" : "-"}</td>
-        <td>${p.conditionnement || "-"}</td>
+        <td>
+          <div class="product-name-line"><strong>${escapeHtml(p.nom_produit || "—")}</strong>${commentIndicatorHtml}</div>
+          <small style="color:var(--text-secondary)">${escapeHtml(p.description || "")}</small>
+        </td>
+        <td style="font-weight:600">${p.prix ? p.prix + " €" : "—"}</td>
+        <td style="color:var(--text-secondary)">${p.prix_unitaire ? p.prix_unitaire + " €" : "—"}</td>
+        <td>${escapeHtml(p.conditionnement || "—")}</td>
         <td>${promoHtml}</td>
         <td>${rayonHtml}</td>
-        <td>${p.enseigne || "-"}</td>
-        <td style="white-space:nowrap;color:var(--text-secondary);font-size:12px">${p.date_debut || "-"} → ${p.date_fin || "-"}</td>
-        <td style="color:var(--text-tertiary);font-size:12px;text-align:center">${p._page || "-"}</td>
-      `;
+        <td>${escapeHtml(p.enseigne || "—")}</td>
+        <td style="white-space:nowrap;color:var(--text-secondary);font-size:12px">${escapeHtml(p.date_debut || "—")} → ${escapeHtml(p.date_fin || "—")}</td>
+        <td style="color:var(--text-tertiary);font-size:12px;text-align:center">${p._page || "—"}</td>`;
+
       const img = tr.querySelector("img.prod-img");
-      if (img) {
-        img.alt = p.nom_produit || "Produit";
-        img.addEventListener("click", () => openLightbox(img.src, img.alt));
-      }
+      if (img) { img.alt = p.nom_produit || "Produit"; img.addEventListener("click", () => openLightbox(img.src, img.alt)); }
       tbody.appendChild(tr);
+
+      if (FEATURE_COMMENTS) {
+        tr.classList.add("row-clickable");
+        tr.addEventListener("click", async e => {
+          if (e.target.closest("img") || e.target.closest("button")) return;
+          await ensureCommentsLoaded(jobId);
+          toggleInlineCommentPanel(index);
+        });
+        const expandTr = document.createElement("tr");
+        expandTr.className = "row-comment-expand hidden";
+        expandTr.dataset.expandFor = String(index);
+        const expandTd = document.createElement("td"); expandTd.colSpan = TABLE_COL_COUNT;
+        expandTr.appendChild(expandTd); tbody.appendChild(expandTr);
+      }
     });
+
+    if (FEATURE_COMMENTS) {
+      ensureCommentsLoaded(jobId).then(() => { updateCommentIndicators(); refreshAllErrorsButton(); });
+    }
   }
 
+  /* ── Reset ───────────────────────────────────────────────── */
   function resetResults() {
+    if (FEATURE_COMMENTS) collapseInlineCommentPanel();
     document.getElementById("results").classList.add("hidden");
     document.body.classList.remove("has-results");
     setTopPanelCollapsed(false);
-    currentResultsJobId = null;
+    currentResultsJobId = null; currentProduits = []; currentResultsHasPdf = false;
+    if (FEATURE_COMMENTS) commentsByProduct = {};
     togglePdfBtn.classList.remove("hidden");
     document.getElementById("tbody").innerHTML = "";
     document.getElementById("jsonOutput").textContent = "";
-    document.getElementById("selectedPdfName").textContent = "-";
-    resultsSummary.textContent = "";
-    resultsSummary.classList.add("hidden");
-    pdfViewer.src = "";
-    isPdfVisible = true;
-    pdfPanel.classList.remove("hidden");
-    resultsLayout.classList.remove("pdf-hidden");
+    document.getElementById("selectedPdfName").textContent = "—";
+    resultsSummary.textContent = ""; resultsSummary.classList.add("hidden");
+    pdfViewer.src = ""; isPdfVisible = true;
+    pdfPanel.classList.remove("hidden"); resultsLayout.classList.remove("pdf-hidden");
     togglePdfBtn.textContent = "Masquer le PDF";
     loadHistory();
   }
@@ -419,15 +942,11 @@
   function toggleTopPanel() { setTopPanelCollapsed(!isTopPanelCollapsed); }
 
   function closeResults() {
-    closeLightbox();
-    resultsClosedByUser = true;
+    closeLightbox(); resultsClosedByUser = true;
     if (activePollInterval) { clearInterval(activePollInterval); activePollInterval = null; }
-    resetResults();
-    showLoader(false);
-    clearUserFeedback();
+    resetResults(); showLoader(false); clearUserFeedback();
     const status = document.getElementById("status");
-    status.textContent = "";
-    status.className = "status hidden";
+    status.textContent = ""; status.className = "status hidden";
   }
 
   function togglePdfPanel() {
@@ -447,71 +966,54 @@
   function setStatus(msg, type) {
     const el = document.getElementById("status");
     if (type === "success") {
-      resultsSummary.textContent = msg;
-      resultsSummary.classList.remove("hidden");
-      el.textContent = "";
-      el.className = "status hidden";
-      return;
+      resultsSummary.textContent = msg; resultsSummary.classList.remove("hidden");
+      el.textContent = ""; el.className = "status hidden"; return;
     }
-    resultsSummary.textContent = "";
-    resultsSummary.classList.add("hidden");
-    el.textContent = msg;
-    el.className = "status " + type;
-    el.classList.remove("hidden");
+    resultsSummary.textContent = ""; resultsSummary.classList.add("hidden");
+    el.textContent = msg; el.className = "status " + type; el.classList.remove("hidden");
   }
 
-  function showLoader(show) {
-    document.getElementById("loader").classList.toggle("hidden", !show);
-  }
-
-  function showUserFeedback(message) {
-    userFeedback.textContent = message;
-    userFeedback.classList.remove("hidden");
-  }
-
-  function clearUserFeedback() {
-    userFeedback.textContent = "";
-    userFeedback.classList.add("hidden");
-  }
+  function showLoader(show) { document.getElementById("loader").classList.toggle("hidden", !show); }
+  function showUserFeedback(msg) { userFeedback.textContent = msg; userFeedback.classList.remove("hidden"); }
+  function clearUserFeedback()   { userFeedback.textContent = ""; userFeedback.classList.add("hidden"); }
 
   function escapeHtml(text) {
-    const div = document.createElement("div");
-    div.textContent = text;
-    return div.innerHTML;
+    const div = document.createElement("div"); div.textContent = text; return div.innerHTML;
   }
 
+  /* ── History ─────────────────────────────────────────────── */
   async function loadHistory() {
     try {
       const data = await fetchJson("/history");
       renderHistory(data.items || []);
+      if (FEATURE_COMMENTS) refreshAllErrorsButton();
     } catch (_) {
       historyList.innerHTML = "";
       historyEmpty.textContent = "Impossible de charger l'historique.";
-      historyEmpty.classList.remove("hidden");
-      historyCount.classList.add("hidden");
+      historyEmpty.classList.remove("hidden"); historyCount.classList.add("hidden");
     }
   }
 
   function renderHistory(items) {
     historyList.innerHTML = "";
-
     if (!items.length) {
       historyEmpty.textContent = "Aucune extraction enregistrée pour le moment.";
-      historyEmpty.classList.remove("hidden");
-      historyCount.classList.add("hidden");
-      return;
+      historyEmpty.classList.remove("hidden"); historyCount.classList.add("hidden"); return;
     }
-
     historyEmpty.classList.add("hidden");
     historyCount.textContent = `${items.length} extraction${items.length > 1 ? "s" : ""}`;
     historyCount.classList.remove("hidden");
 
     items.forEach(item => {
-      const li = document.createElement("li");
-      li.className = "history-item";
-      const dateLabel = historyDateFmt.format(new Date(item.finished_at * 1000));
+      const li = document.createElement("li"); li.className = "history-item";
+      const dateLabel  = historyDateFmt.format(new Date(item.finished_at * 1000));
       const countLabel = `${item.produits_count} produit${item.produits_count > 1 ? "s" : ""}`;
-      const pdfBadge = item.has_pdf ? "" : `<span class="history-badge">PDF non archivé</span>`;
+      const pdfBadge   = item.has_pdf ? "" : `<span class="history-badge">PDF non archivé</span>`;
+      const errorsCount = Number(item.errors_count || 0);
+      const errorsBadge =
+        (FEATURE_COMMENTS && errorsCount > 0)
+          ? `<span class="history-badge history-badge-error">${errorsCount} ${errorsCount > 1 ? "erreurs" : "erreur"}</span>`
+          : "";
 
       li.innerHTML = `
         <div class="history-item-btn" role="button" tabindex="0" data-job-id="${item.job_id}">
@@ -520,92 +1022,49 @@
           </span>
           <span class="history-item-body">
             <span class="history-item-name">${escapeHtml(item.pdf_name)}</span>
-            <span class="history-item-meta">${escapeHtml(dateLabel)} · ${escapeHtml(countLabel)} ${pdfBadge}</span>
+            <span class="history-item-meta">${escapeHtml(dateLabel)} · ${escapeHtml(countLabel)} ${pdfBadge} ${errorsBadge}</span>
           </span>
           <button type="button" class="history-item-delete" aria-label="Supprimer cette extraction">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <polyline points="3 6 5 6 21 6"/>
-              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
-              <path d="M10 11v6"/>
-              <path d="M14 11v6"/>
-              <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
-            </svg>
+            <svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
           </button>
           <span class="history-item-chevron" aria-hidden="true">
-            <svg viewBox="0 0 24 24">
-              <polyline points="9 18 15 12 9 6"></polyline>
-            </svg>
+            <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"></polyline></svg>
           </span>
-        </div>
-      `;
+        </div>`;
 
       const openEl = li.querySelector(".history-item-btn");
-      openEl.addEventListener("click", () => openHistoryJob(item.job_id));
-      openEl.addEventListener("keydown", e => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          openHistoryJob(item.job_id);
-        }
-      });
-
-      li.querySelector(".history-item-delete").addEventListener("click", e => {
-        e.stopPropagation();
-        deleteHistoryJob(item.job_id);
-      });
+      openEl.addEventListener("click",   () => openHistoryJob(item.job_id));
+      openEl.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openHistoryJob(item.job_id); } });
+      li.querySelector(".history-item-delete").addEventListener("click", e => { e.stopPropagation(); deleteHistoryJob(item.job_id); });
       historyList.appendChild(li);
     });
   }
 
   function openHistoryJob(jobId) {
-    resultsClosedByUser = false;
-    clearUserFeedback();
-    resetResults();
-    setStatus("Chargement des résultats…", "info");
-    showLoader(true);
-
+    resultsClosedByUser = false; clearUserFeedback(); resetResults();
+    setStatus("Chargement des résultats…", "info"); showLoader(true);
     fetchJson(`/results/${jobId}`)
       .then(data => {
         showLoader(false);
         const produits = data.produits || [];
-        if (!produits.length) {
-          setStatus("Cette extraction ne contient aucun produit.", "error");
-          return;
-        }
-        const pdfLabel = data.has_pdf === false
-          ? `${data.pdf_name} (aperçu PDF indisponible)`
-          : data.pdf_name;
+        if (!produits.length) { setStatus("Cette extraction ne contient aucun produit.", "error"); return; }
+        const pdfLabel = data.has_pdf === false ? `${data.pdf_name} (aperçu PDF indisponible)` : data.pdf_name;
         setStatus(`✓ ${produits.length} produits - historique`, "success");
         renderResults(produits, jobId, pdfLabel, data.has_pdf !== false);
       })
-      .catch(err => {
-        showLoader(false);
-        setStatus("Impossible de charger l'extraction : " + err.message, "error");
-      });
+      .catch(err => { showLoader(false); setStatus("Impossible de charger l'extraction : " + err.message, "error"); });
   }
 
   function deleteHistoryJob(jobId) {
-    const ok = confirm("Supprimer cette extraction de l'historique ?");
-    if (!ok) return;
-
-    clearUserFeedback();
-    setStatus("Suppression de l'extraction…", "info");
-    showLoader(true);
-
+    if (!confirm("Supprimer cette extraction de l'historique ?")) return;
+    clearUserFeedback(); setStatus("Suppression de l'extraction…", "info"); showLoader(true);
     fetchJson(`/history/delete/${jobId}`, { method: "POST" })
       .then(() => {
-        showLoader(false);
-        setStatus("Extraction supprimée.", "success");
-
-        if (currentResultsJobId === jobId) {
-          resetResults();
-        } else {
-          loadHistory();
-        }
+        showLoader(false); setStatus("Extraction supprimée.", "success");
+        if (currentResultsJobId === jobId) resetResults(); else loadHistory();
+        if (FEATURE_COMMENTS) { hideAllErrorsView(); refreshAllErrorsButton(); }
       })
-      .catch(err => {
-        showLoader(false);
-        setStatus("Suppression impossible : " + err.message, "error");
-      });
+      .catch(err => { showLoader(false); setStatus("Suppression impossible : " + err.message, "error"); });
   }
 </script>
 

@@ -30,6 +30,23 @@ RESULTS_FOLDER.mkdir(exist_ok=True)
 ARCHIVED_PDF = "source.pdf"
 META_FILE = "meta.json"
 PRODUITS_FILE = "produits.json"
+COMMENTS_FILE = "comments.json"
+COMMENT_CATEGORIES = frozenset({
+    "image",
+    "produit",
+    "description",
+    "prix",
+    "prix_unitaire",
+    "conditionnement",
+    "promo",
+    "rayon",
+    "enseigne",
+    "dates",
+    "autre",
+})
+FEATURE_PRODUCT_COMMENTS = os.getenv(
+    "FEATURE_PRODUCT_COMMENTS", "true"
+).strip().lower() in {"1", "true", "yes", "on"}
 JOB_ID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
     re.IGNORECASE,
@@ -104,6 +121,157 @@ def load_produits_from_disk(job_id: str) -> dict | None:
     return {"produits": produits, "pdf_name": pdf_name}
 
 
+def comments_path(job_id: str) -> Path:
+    return job_dir(job_id) / COMMENTS_FILE
+
+
+def _normalize_comment_entry(entry: dict) -> dict | None:
+    if not isinstance(entry, dict):
+        return None
+    comment = entry.get("comment")
+    if not isinstance(comment, str) or not comment.strip():
+        return None
+    category = entry.get("category")
+    if category not in COMMENT_CATEGORIES:
+        category = "autre"
+    comment_id = entry.get("id")
+    if not isinstance(comment_id, str) or not comment_id:
+        comment_id = str(uuid.uuid4())
+    updated_at = entry.get("updated_at")
+    if not isinstance(updated_at, (int, float)):
+        updated_at = time.time()
+    return {
+        "id": comment_id,
+        "category": category,
+        "comment": comment.strip(),
+        "updated_at": updated_at,
+    }
+
+
+def read_comments(job_id: str) -> dict[str, list[dict]]:
+    """Retourne { product_index_str: [ {id, category, comment, updated_at}, ... ] }."""
+    path = comments_path(job_id)
+    if not path.is_file():
+        return {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return {}
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+    normalized: dict[str, list[dict]] = {}
+    needs_persist = False
+    for key, value in data.items():
+        try:
+            int(key)
+        except (TypeError, ValueError):
+            continue
+
+        entries: list[dict] = []
+        if isinstance(value, list):
+            for item in value:
+                if isinstance(item, dict) and not item.get("id"):
+                    needs_persist = True
+                entry = _normalize_comment_entry(item)
+                if entry:
+                    entries.append(entry)
+        elif isinstance(value, dict):
+            if not value.get("id"):
+                needs_persist = True
+            entry = _normalize_comment_entry(value)
+            if entry:
+                entries.append(entry)
+
+        if entries:
+            normalized[str(key)] = entries
+
+    if needs_persist and normalized:
+        write_comments(job_id, normalized)
+    return normalized
+
+
+def write_comments(job_id: str, comments: dict[str, list[dict]]) -> None:
+    path = comments_path(job_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(comments, f, ensure_ascii=False, indent=2)
+
+
+def flatten_comment_items(comments: dict[str, list[dict]]) -> list[dict]:
+    items: list[dict] = []
+    for key, entries in comments.items():
+        try:
+            idx = int(key)
+        except (TypeError, ValueError):
+            continue
+        for entry in entries:
+            items.append({
+                "product_index": idx,
+                "id": entry.get("id"),
+                "category": entry.get("category"),
+                "comment": entry.get("comment"),
+                "updated_at": entry.get("updated_at"),
+            })
+    items.sort(key=lambda it: (it["product_index"], -(it.get("updated_at") or 0)))
+    return items
+
+
+def comments_feature_enabled() -> bool:
+    return FEATURE_PRODUCT_COMMENTS
+
+
+def list_all_comments() -> list[dict]:
+    items: list[dict] = []
+    if not RESULTS_FOLDER.is_dir():
+        return items
+
+    for entry in RESULTS_FOLDER.iterdir():
+        if not entry.is_dir() or not valid_job_id(entry.name):
+            continue
+
+        job_id = entry.name
+        disk = load_produits_from_disk(job_id)
+        if not disk:
+            continue
+
+        meta = read_meta(job_id) or {}
+        pdf_name = disk["pdf_name"]
+        produits = disk["produits"]
+        comments = read_comments(job_id)
+
+        for flat in flatten_comment_items(comments):
+            idx = flat["product_index"]
+            if idx < 0 or idx >= len(produits):
+                continue
+
+            product = produits[idx]
+            product_name = product.get("nom_produit") or f"Ligne {idx + 1}"
+            items.append({
+                "job_id": job_id,
+                "pdf_name": pdf_name,
+                "product_index": idx,
+                "product_name": product_name,
+                "image_path": product.get("image_path"),
+                "id": flat.get("id"),
+                "category": flat.get("category"),
+                "comment": flat.get("comment"),
+                "updated_at": flat.get("updated_at"),
+                "finished_at": meta.get("finished_at"),
+                "has_pdf": resolve_pdf_path(job_id) is not None,
+            })
+
+    items.sort(
+        key=lambda it: (
+            -(it.get("updated_at") or 0),
+            it.get("pdf_name") or "",
+            it.get("product_index") or 0,
+        ),
+    )
+    return items
+
+
 def archived_pdf_path(job_id: str) -> Path | None:
     path = job_dir(job_id) / ARCHIVED_PDF
     return path if path.is_file() else None
@@ -167,6 +335,20 @@ def list_history_items() -> list[dict]:
         if not isinstance(count, int):
             count = len(produits)
 
+        errors_count = 0
+        if FEATURE_PRODUCT_COMMENTS:
+            # Nombre total d'erreurs enregistrées (une erreur = un commentaire/entry).
+            comments = read_comments(job_id)
+            for key, entries in comments.items():
+                try:
+                    idx = int(key)
+                except (TypeError, ValueError):
+                    continue
+                if idx < 0 or idx >= len(produits):
+                    continue
+                if isinstance(entries, list):
+                    errors_count += len(entries)
+
         pdf_name = meta.get("pdf_name") or pdata.get("source") or "PDF"
         finished_at = meta.get("finished_at")
         if not isinstance(finished_at, (int, float)):
@@ -176,6 +358,7 @@ def list_history_items() -> list[dict]:
             "job_id": job_id,
             "pdf_name": pdf_name,
             "produits_count": count,
+            "errors_count": errors_count,
             "finished_at": finished_at,
             "has_pdf": (entry / ARCHIVED_PDF).is_file(),
         })
@@ -281,6 +464,11 @@ def start_job(pdf_path: Path, pdf_display_name: str | None = None) -> tuple[str 
     return job_id, None
 
 
+@app.context_processor
+def inject_template_globals():
+    return {"feature_product_comments": FEATURE_PRODUCT_COMMENTS}
+
+
 @app.route("/")
 def index():
     pdf = pdf_default()
@@ -327,6 +515,114 @@ def delete_history_item(job_id: str):
         return jsonify({"error": f"Suppression impossible : {exc}"}), 500
 
     jobs.pop(job_id, None)
+    return jsonify({"ok": True})
+
+
+@app.route("/comments/all", methods=["GET"])
+def get_all_comments():
+    if not comments_feature_enabled():
+        return jsonify({"error": "Fonctionnalité désactivée"}), 404
+    return jsonify({"items": list_all_comments()})
+
+
+@app.route("/comments/<job_id>", methods=["GET"])
+def get_comments(job_id: str):
+    if not comments_feature_enabled():
+        return jsonify({"error": "Fonctionnalité désactivée"}), 404
+    if not valid_job_id(job_id):
+        return jsonify({"error": "Job inconnu"}), 404
+
+    disk = load_produits_from_disk(job_id)  # vérifie que le job est bien présent
+    if not disk:
+        return jsonify({"error": "Job inconnu"}), 404
+
+    return jsonify({"items": flatten_comment_items(read_comments(job_id))})
+
+
+@app.route("/comments/<job_id>/save", methods=["POST"])
+def save_comment(job_id: str):
+    if not comments_feature_enabled():
+        return jsonify({"error": "Fonctionnalité désactivée"}), 404
+    if not valid_job_id(job_id):
+        return jsonify({"error": "Job inconnu"}), 404
+
+    disk = load_produits_from_disk(job_id)
+    if not disk:
+        return jsonify({"error": "Job inconnu"}), 404
+
+    body = request.get_json(silent=True) or {}
+    product_index = body.get("product_index")
+    category = body.get("category")
+    comment = body.get("comment", "")
+
+    if not isinstance(product_index, int) or product_index < 0:
+        return jsonify({"error": "product_index invalide"}), 400
+    if product_index >= len(disk["produits"]):
+        return jsonify({"error": "product_index hors limites"}), 404
+
+    if category not in COMMENT_CATEGORIES:
+        return jsonify({"error": "category invalide"}), 400
+
+    if not isinstance(comment, str):
+        return jsonify({"error": "comment invalide"}), 400
+    comment = comment.strip()
+    if not comment:
+        return jsonify({"error": "comment ne peut pas être vide"}), 400
+    if len(comment) > 2000:
+        return jsonify({"error": "comment trop long"}), 400
+
+    comments = read_comments(job_id)
+    key = str(product_index)
+    new_id = str(uuid.uuid4())
+    new_entry = {
+        "id": new_id,
+        "category": category,
+        "comment": comment,
+        "updated_at": time.time(),
+    }
+    comments.setdefault(key, []).append(new_entry)
+    write_comments(job_id, comments)
+    return jsonify({"ok": True, "id": new_id})
+
+
+@app.route("/comments/<job_id>/delete", methods=["POST"])
+def delete_comment(job_id: str):
+    if not comments_feature_enabled():
+        return jsonify({"error": "Fonctionnalité désactivée"}), 404
+    if not valid_job_id(job_id):
+        return jsonify({"error": "Job inconnu"}), 404
+
+    disk = load_produits_from_disk(job_id)
+    if not disk:
+        return jsonify({"error": "Job inconnu"}), 404
+
+    body = request.get_json(silent=True) or {}
+    comment_id = body.get("comment_id")
+    product_index = body.get("product_index")
+
+    if not isinstance(comment_id, str) or not comment_id.strip():
+        return jsonify({"error": "comment_id invalide"}), 400
+    comment_id = comment_id.strip()
+
+    comments = read_comments(job_id)
+    removed = False
+    for key, entries in list(comments.items()):
+        filtered = [e for e in entries if e.get("id") != comment_id]
+        if len(filtered) != len(entries):
+            removed = True
+            if filtered:
+                comments[key] = filtered
+            else:
+                comments.pop(key, None)
+
+    if not removed:
+        return jsonify({"error": "Commentaire introuvable"}), 404
+
+    if isinstance(product_index, int) and product_index >= 0:
+        if product_index >= len(disk["produits"]):
+            return jsonify({"error": "product_index hors limites"}), 404
+
+    write_comments(job_id, comments)
     return jsonify({"ok": True})
 
 
