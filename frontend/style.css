@@ -451,16 +451,67 @@ body {
   color: var(--amber-600);
 }
 
-.history-item-arrow {
+.history-item-chevron {
   flex-shrink: 0;
-  font-size: 16px;
-  color: var(--text-tertiary);
-  transition: color 0.18s, transform 0.18s;
+  width: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.18s;
 }
 
-.history-item-btn:hover .history-item-arrow {
-  color: var(--teal-600);
+.history-item-chevron svg {
+  width: 18px;
+  height: 18px;
+  stroke: var(--text-tertiary);
+  fill: none;
+  stroke-width: 2.2px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.history-item-btn:hover .history-item-chevron {
   transform: translateX(2px);
+}
+
+.history-item-btn:hover .history-item-chevron svg {
+  stroke: var(--teal-600);
+}
+
+.history-item-delete {
+  flex-shrink: 0;
+  border: 1px solid rgba(153, 60, 29, 0.18);
+  background: transparent;
+  color: var(--coral-600);
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.18s, transform 0.18s, border-color 0.18s;
+}
+
+.history-item-delete svg {
+  width: 16px;
+  height: 16px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2.1px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.history-item-delete:hover {
+  background: rgba(153, 60, 29, 0.10);
+  border-color: rgba(153, 60, 29, 0.35);
+  transform: translateY(-1px);
+}
+
+.history-item-delete:focus-visible {
+  outline: 2px solid rgba(34, 184, 180, 0.45);
+  outline-offset: 2px;
 }
 
 /* ─── Toggle top panel button ─────────────────────────────── */

@@ -189,6 +189,7 @@
   let isTopPanelCollapsed = false;
   let activePollInterval = null;
   let resultsClosedByUser = false;
+  let currentResultsJobId = null;
 
   const DEFAULT_CLIENT_POLL_TIMEOUT_MS = 4 * 60 * 1000;
   const CLIENT_TIMEOUT_SAFETY_BUFFER_MS = 30 * 1000;
@@ -327,6 +328,7 @@
   }
 
   function renderResults(produits, jobId, pdfName, hasPdf = true) {
+    currentResultsJobId = jobId;
     document.getElementById("results").classList.remove("hidden");
     document.body.classList.add("has-results");
     setTopPanelCollapsed(true);
@@ -389,6 +391,7 @@
     document.getElementById("results").classList.add("hidden");
     document.body.classList.remove("has-results");
     setTopPanelCollapsed(false);
+    currentResultsJobId = null;
     togglePdfBtn.classList.remove("hidden");
     document.getElementById("tbody").innerHTML = "";
     document.getElementById("jsonOutput").textContent = "";
@@ -511,7 +514,7 @@
       const pdfBadge = item.has_pdf ? "" : `<span class="history-badge">PDF non archivé</span>`;
 
       li.innerHTML = `
-        <button type="button" class="history-item-btn" data-job-id="${item.job_id}">
+        <div class="history-item-btn" role="button" tabindex="0" data-job-id="${item.job_id}">
           <span class="history-item-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
           </span>
@@ -519,12 +522,35 @@
             <span class="history-item-name">${escapeHtml(item.pdf_name)}</span>
             <span class="history-item-meta">${escapeHtml(dateLabel)} · ${escapeHtml(countLabel)} ${pdfBadge}</span>
           </span>
-          <span class="history-item-arrow" aria-hidden="true">→</span>
-        </button>
+          <button type="button" class="history-item-delete" aria-label="Supprimer cette extraction">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <polyline points="3 6 5 6 21 6"/>
+              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+              <path d="M10 11v6"/>
+              <path d="M14 11v6"/>
+              <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+            </svg>
+          </button>
+          <span class="history-item-chevron" aria-hidden="true">
+            <svg viewBox="0 0 24 24">
+              <polyline points="9 18 15 12 9 6"></polyline>
+            </svg>
+          </span>
+        </div>
       `;
 
-      li.querySelector(".history-item-btn").addEventListener("click", () => {
-        openHistoryJob(item.job_id);
+      const openEl = li.querySelector(".history-item-btn");
+      openEl.addEventListener("click", () => openHistoryJob(item.job_id));
+      openEl.addEventListener("keydown", e => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          openHistoryJob(item.job_id);
+        }
+      });
+
+      li.querySelector(".history-item-delete").addEventListener("click", e => {
+        e.stopPropagation();
+        deleteHistoryJob(item.job_id);
       });
       historyList.appendChild(li);
     });
@@ -554,6 +580,31 @@
       .catch(err => {
         showLoader(false);
         setStatus("Impossible de charger l'extraction : " + err.message, "error");
+      });
+  }
+
+  function deleteHistoryJob(jobId) {
+    const ok = confirm("Supprimer cette extraction de l'historique ?");
+    if (!ok) return;
+
+    clearUserFeedback();
+    setStatus("Suppression de l'extraction…", "info");
+    showLoader(true);
+
+    fetchJson(`/history/delete/${jobId}`, { method: "POST" })
+      .then(() => {
+        showLoader(false);
+        setStatus("Extraction supprimée.", "success");
+
+        if (currentResultsJobId === jobId) {
+          resetResults();
+        } else {
+          loadHistory();
+        }
+      })
+      .catch(err => {
+        showLoader(false);
+        setStatus("Suppression impossible : " + err.message, "error");
       });
   }
 </script>

@@ -300,6 +300,36 @@ def history():
     return jsonify({"items": list_history_items()})
 
 
+@app.route("/history/delete/<job_id>", methods=["POST"])
+def delete_history_item(job_id: str):
+    if not valid_job_id(job_id):
+        return jsonify({"error": "Job inconnu"}), 404
+
+    job = jobs.get(job_id)
+    if job and job.get("status") == "en cours":
+        return jsonify({"error": "Extraction en cours : suppression impossible"}), 409
+
+    job_directory = job_dir(job_id)
+    if not job_directory.exists():
+        jobs.pop(job_id, None)
+        return jsonify({"error": "Job introuvable"}), 404
+
+    # Best effort: if we have a future object and it's not running anymore, cancel it.
+    if job and job.get("_future") is not None:
+        try:
+            job["_future"].cancel()
+        except Exception:
+            pass
+
+    try:
+        shutil.rmtree(job_directory)
+    except OSError as exc:
+        return jsonify({"error": f"Suppression impossible : {exc}"}), 500
+
+    jobs.pop(job_id, None)
+    return jsonify({"ok": True})
+
+
 @app.route("/upload", methods=["POST"])
 def upload():
     uploaded = request.files.get("pdf")
