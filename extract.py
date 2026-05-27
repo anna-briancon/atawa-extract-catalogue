@@ -700,6 +700,66 @@ def ok_image(image_bytes: bytes) -> bool:
     return True
 
 
+def is_fitz_banner(w_pt: float, h_pt: float, rect, page_w: float, page_h: float) -> bool:
+    """
+    Rejette les bandeaux promo / en-têtes catalogue (ex. « LES PRIX COÛTANTS »).
+    Ces images sont larges, peu hautes, et collées en haut de page.
+    """
+    if w_pt <= 0 or h_pt <= 0 or page_w <= 0 or page_h <= 0:
+        return True
+
+    aspect = w_pt / h_pt
+    width_ratio = w_pt / page_w
+    height_ratio = h_pt / page_h
+    top_ratio = rect.y0 / page_h
+
+    banner_aspect = env_float("FITZ_BANNER_MAX_ASPECT", 2.5, minimum=1.0)
+    if aspect >= banner_aspect and width_ratio >= 0.55:
+        return True
+
+    if top_ratio <= 0.15 and width_ratio >= 0.65 and height_ratio <= 0.22:
+        return True
+
+    return False
+
+
+def is_fitz_logo_badge(w_pt: float, h_pt: float, rect, page_w: float, page_h: float) -> bool:
+    """
+    Rejette les pictos / logos (ex. « Soutien à la production française »).
+    Ce sont des visuels petits, souvent carrés, en marge de page.
+    """
+    if w_pt <= 0 or h_pt <= 0 or page_w <= 0 or page_h <= 0:
+        return False
+
+    page_area = page_w * page_h
+    area_ratio = (w_pt * h_pt) / page_area
+    aspect = w_pt / h_pt
+    max_badge_ratio = env_float("FITZ_MAX_BADGE_AREA_RATIO", 0.035, minimum=0.0)
+
+    if area_ratio > max_badge_ratio:
+        return False
+
+    if 0.75 <= aspect <= 1.35:
+        return True
+
+    left_margin = rect.x1 <= page_w * 0.22
+    right_margin = rect.x0 >= page_w * 0.78
+    return area_ratio <= max_badge_ratio * 1.5 and (left_margin or right_margin)
+
+
+def fitz_image_rank_key(item: dict, page_w: float, page_h: float) -> tuple:
+    """Priorise les photos produit (grandes surfaces) plutôt que les visuels décoratifs."""
+    page_area = page_w * page_h if page_w > 0 and page_h > 0 else 1.0
+    area_ratio = item["area"] / page_area
+    x0, y0, x1, y1 = item["bbox_pt"]
+    w = max(0.0, x1 - x0)
+    h = max(0.0, y1 - y0)
+    aspect = w / h if h > 0 else 99.0
+    cy_ratio = item["cy"] / page_h if page_h > 0 else 0.5
+    aspect_penalty = min(abs(aspect - 1.0), abs(aspect - 0.8))
+    return (-area_ratio, aspect_penalty, cy_ratio)
+
+
 def is_local() -> bool:
     flask_env = os.environ.get("FLASK_ENV", "").strip().lower()
     app_env = os.environ.get("APP_ENV", "").strip().lower()
@@ -794,6 +854,10 @@ def fitz_images(pdf_path: Path, output_dir: Path, page_numbers: list[int]) -> di
                 h_pt = rect.height
                 if w_pt < min_side_pt or h_pt < min_side_pt:
                     continue
+                if is_fitz_banner(w_pt, h_pt, rect, page_w, page_h):
+                    continue
+                if is_fitz_logo_badge(w_pt, h_pt, rect, page_w, page_h):
+                    continue
                 if page_area > 0:
                     area_ratio = (w_pt * h_pt) / page_area
                     if area_ratio < min_area_ratio:
@@ -845,7 +909,7 @@ def fitz_images(pdf_path: Path, output_dir: Path, page_numbers: list[int]) -> di
                     "image_path": cached_path,
                 })
 
-        items.sort(key=lambda d: (d["cy"], -d["area"]))
+        items.sort(key=lambda d: fitz_image_rank_key(d, page_w, page_h))
         page_images[page_num] = items
 
     doc.close()
