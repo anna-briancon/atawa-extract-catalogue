@@ -876,6 +876,13 @@
 
   /* ── Render results ──────────────────────────────────────── */
   function renderResults(produits, jobId, pdfName, hasPdf = true) {
+    // Sécurité UI : dès que les résultats sont prêts, on coupe l'overlay de chargement.
+    const statusEl = document.getElementById("status");
+    statusEl.textContent = "";
+    statusEl.className = "progress-message hidden";
+    showLoader(false);
+    syncProgressBlock();
+
     currentResultsJobId = jobId; currentProduits = produits; currentResultsHasPdf = hasPdf;
     document.getElementById("results").classList.remove("hidden");
     document.body.classList.add("has-results");
